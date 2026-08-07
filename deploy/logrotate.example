@@ -1,0 +1,20 @@
+# Optional OS-level log rotation for the avatar-imaging access log.
+#
+# The service already rotates by size on its own (AVATAR_IMAGING_LOG_MAX_BYTES /
+# _MAX_FILES). Use this ONLY if you prefer logrotate's time-based rotation
+# instead — in that case set a very large AVATAR_IMAGING_LOG_MAX_BYTES so the
+# built-in size rotation effectively stays out of the way, and rely on this.
+#
+# Install as /etc/logrotate.d/avatar-imaging (adjust the path/user).
+
+/var/log/avatar-imaging/access.log {
+    daily
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    # The service keeps the file open, so truncate in place rather than renaming
+    # (no SIGHUP/reopen support needed).
+    copytruncate
+}

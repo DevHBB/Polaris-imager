@@ -150,6 +150,74 @@ CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome
 
 (The pool auto-detects `PLAYWRIGHT_BROWSERS_PATH` too.)
 
+## Deploying on Ubuntu (systemd)
+
+A hardened unit file is provided at
+[`deploy/avatar-imaging.service`](deploy/avatar-imaging.service). Full walkthrough
+(assumes the service lives at `/opt/avatar-imaging` and the renderer at
+`/opt/Nitro-Renderer` — adjust to taste):
+
+```sh
+# 1. Node 20 LTS + git
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+
+# 2. A dedicated, unprivileged user
+sudo useradd --system --home /opt/avatar-imaging --shell /usr/sbin/nologin avatar
+
+# 3. Put the code in place (copy/clone your renderer + this service), e.g.:
+sudo mkdir -p /opt/avatar-imaging /opt/Nitro-Renderer
+#   ...copy the avatar-imaging/ contents to /opt/avatar-imaging and the
+#      Nitro-Renderer/ contents to /opt/Nitro-Renderer...
+sudo chown -R avatar:avatar /opt/avatar-imaging /opt/Nitro-Renderer
+
+# 4. Install deps + link the renderer, as the service user
+sudo -u avatar bash -lc '
+  cd /opt/Nitro-Renderer && yarn install && yarn link
+  cd /opt/avatar-imaging && npm install && yarn link "@nitrots/nitro-renderer"
+'
+
+# 5. Install Chromium into the pinned browser path (root, for --with-deps libs)
+sudo PLAYWRIGHT_BROWSERS_PATH=/opt/avatar-imaging/pw-browsers \
+     npx --yes playwright install --with-deps chromium
+sudo chown -R avatar:avatar /opt/avatar-imaging/pw-browsers
+
+# 6. Build the harness bundle
+sudo -u avatar bash -lc 'cd /opt/avatar-imaging && npm run build:harness'
+
+# 7. Configure. Bind to loopback (nginx faces the internet) and set your hosts.
+sudo -u avatar cp /opt/avatar-imaging/.env.example /opt/avatar-imaging/.env
+sudo -u avatar $EDITOR /opt/avatar-imaging/.env
+#   AVATAR_IMAGING_HOST=127.0.0.1
+#   AVATAR_IMAGING_TRUST_PROXY=true
+#   AVATAR_IMAGING_CLIENT_IP_HEADER=x-forwarded-for   # or cf-connecting-ip
+#   AVATAR_IMAGING_LOG_FILE=/var/log/avatar-imaging/access.log
+#   NITRO_GAMEDATA_URL=... / NITRO_ASSET_URL=... (+ your overrides)
+
+# 8. Log directory
+sudo mkdir -p /var/log/avatar-imaging
+sudo chown avatar:avatar /var/log/avatar-imaging
+
+# 9. Install + start the service
+sudo cp /opt/avatar-imaging/deploy/avatar-imaging.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now avatar-imaging
+
+# 10. Verify
+systemctl status avatar-imaging
+journalctl -u avatar-imaging -f          # startup + operational logs
+curl -s http://127.0.0.1:8081/health     # {"status":"ok","ready":true,...}
+```
+
+The unit runs as the `avatar` user with `NoNewPrivileges`, `ProtectSystem=strict`,
+`ProtectHome`, `PrivateTmp`, a `MemoryMax=2G` ceiling, and auto-restart. The
+access log rotates itself (see above); operational logs go to the journal. Then
+put the [nginx config](deploy/nginx.conf.example) in front for TLS + caching.
+
+To update later: deploy the new code, then
+`sudo -u avatar bash -lc 'cd /opt/avatar-imaging && npm run build:harness'` and
+`sudo systemctl restart avatar-imaging`.
+
 ## Using it from a CMS
 
 The service is a plain HTTP image endpoint, so a CMS just uses it as an `<img>`
@@ -178,6 +246,27 @@ that API, then points an `<img>` at this service to show the avatar.
 - **Rate limiting**: per-IP fixed window (`AVATAR_IMAGING_RATELIMIT_*`), 429 when
   exceeded. Behind a proxy set `AVATAR_IMAGING_TRUST_PROXY` so the real client IP
   is used.
+- **Real client IP behind a CDN**: set `AVATAR_IMAGING_CLIENT_IP_HEADER` to the
+  header your edge sets — `cf-connecting-ip` (Cloudflare) or `x-forwarded-for`
+  (nginx) — and both logging and rate limiting use it instead of the proxy's IP.
+- **Access log**: on by default (`AVATAR_IMAGING_ACCESS_LOG=0` to silence). One
+  line per client request with the resolved IP, method, path, status, cache hit,
+  and timing (any `?key=` is redacted):
+
+  ```
+  [access] 203.0.113.99 GET /avatarimage?figure=hd-180-1&size=l -> 200 5183b HIT 1ms
+  ```
+
+  Health checks and the internal harness/config routes are excluded to keep it
+  readable. By default it goes to stdout (systemd journal, Docker logs, etc.).
+
+  **Log rotation**: set `AVATAR_IMAGING_LOG_FILE` to write to a file with
+  built-in size-based rotation — it rolls to `<file>.1 … <file>.N` at
+  `AVATAR_IMAGING_LOG_MAX_BYTES` (default 10 MB), keeping
+  `AVATAR_IMAGING_LOG_MAX_FILES` (default 5). No external tooling needed, so it
+  works the same in Docker. If you'd rather rotate by time with the OS, use
+  [`deploy/logrotate.example`](deploy/logrotate.example) (with `copytruncate`)
+  and set a large `LOG_MAX_BYTES` so the built-in rotation stays out of the way.
 - **Load shedding**: the render queue is bounded (`AVATAR_IMAGING_MAX_QUEUE`); a
   flood of unique (cache-missing) requests gets 503 instead of exhausting CPU.
 - **No info leak**: render errors return a generic message; details are logged
@@ -197,15 +286,53 @@ Rendering is the only expensive part, so caching is what keeps CPU low:
 
 1. **In-memory LRU + TTL** (`AVATAR_IMAGING_CACHE_*`): identical requests are
    served from memory and never re-rendered.
-2. **HTTP caching**: every image carries a strong `ETag` and a `Cache-Control:
-   public, max-age=…`. Conditional requests (`If-None-Match`) get a cheap `304`.
+2. **HTTP caching**: every image carries an `ETag` (derived from the request, so
+   a conditional `If-None-Match` is answered `304` **without rendering** — ~1 ms
+   instead of a full render) and a `Cache-Control: public, max-age=…`.
+   The `X-Cache` header (and access log) shows which path a request took:
+   `HIT` (served from the in-memory cache), `MISS` (rendered fresh), or
+   `REVALIDATED` (304, client's copy still valid — no render, no bytes).
+   Because the ETag is request-based, bump `AVATAR_IMAGING_ASSET_VERSION` when
+   you regenerate gamedata/assets to invalidate clients' cached copies.
    **Put a reverse proxy or CDN in front** (nginx `proxy_cache`, Varnish,
    Cloudflare) and the vast majority of requests are served from that cache —
-   they never reach Node or the renderer at all. This is the real offload.
+   they never reach Node or the renderer at all. This is the real offload. A
+   ready-to-adapt config (proxy cache, cache-lock, rate limit, real-IP
+   forwarding, blocked internal routes) is in
+   [`deploy/nginx.conf.example`](deploy/nginx.conf.example) — bind the service to
+   `127.0.0.1` and let nginx face the internet.
 
 Because a given figure+params always produces the same image, cache lifetimes
 can be long. If a user changes their look the URL changes (different `figure`),
 so you rarely need to invalidate; lower `max-age` only if you regenerate assets.
+
+### Memory & sizing
+
+Most of the footprint is Chromium — each pool page is a full renderer instance.
+
+| Part | Rough RAM |
+| ---- | --------- |
+| Node process | ~60–90 MB |
+| Chromium (browser + `AVATAR_IMAGING_POOL` pages) | ~250 MB + ~250–500 MB per page |
+| Response cache | up to `AVATAR_IMAGING_CACHE_MAX_BYTES` (default 256 MB) |
+
+So a default **pool of 2 sits around ~1–1.5 GB warmed**, growing ~linearly with
+the pool size. **Budget ~1.5–2 GB** for a small deploy; give it more if you
+raise `AVATAR_IMAGING_POOL`.
+
+Each renderer page caches every clothing/effect texture it has ever drawn and
+never evicts, so without limits a long-running page creeps upward with the
+*variety* of requests. Two bounds keep it flat:
+
+- **`AVATAR_IMAGING_PAGE_MAX_RENDERS`** (default 500) — recycles a page (close +
+  recreate) after N renders, releasing its accumulated assets. Set `0` to
+  disable if you have plenty of RAM and want to avoid the occasional recycle.
+- **`AVATAR_IMAGING_CACHE_MAX_BYTES`** (default 256 MB) — hard cap on the
+  in-memory image cache, evicted LRU alongside the entry-count cap.
+
+Tuning: lower `AVATAR_IMAGING_POOL` (fewer concurrent renders, less RAM), lower
+`PAGE_MAX_RENDERS` (recycle sooner, flatter memory, slightly more churn), or lean
+harder on the nginx/CDN cache so fewer requests hit the renderer at all.
 
 ## Notes & limitations
 
