@@ -168,9 +168,13 @@ app.get('/', (req, res) => {
             '  size            s | n | l                      (default n)',
             '  frame_num       still-frame index              (default 0)',
             '  img_format      png | apng | auto              (default auto)',
+            '  text            speech-bubble text above the avatar',
+            '  text_color      bubble text colour, hex        (default 000000)',
+            '  bubble_color    bubble background colour, hex  (default ffffff)',
             '',
             'Example:',
             '  /avatarimage?figure=hd-180-1.ch-255-66.lg-280-110.sh-305-62&action=wlk,wav&direction=2&size=l',
+            '  /avatarimage?figure=hd-180-1.ch-255-66&text=Hello!&bubble_color=2266cc&text_color=ffffff',
             ''
         ].join('\n')
     );
@@ -194,7 +198,8 @@ app.get('/avatarimage', cors, rateLimiter, apiKeyGuard, async (req, res) => {
         descriptor = parseAvatarParams(req.query, {
             defaultFigure: process.env.AVATAR_IMAGING_DEFAULT_FIGURE || null,
             maxFigureLength: CONFIG.maxFigureLength,
-            maxActionLength: CONFIG.maxActionLength
+            maxActionLength: CONFIG.maxActionLength,
+            maxTextLength: CONFIG.maxTextLength
         });
     } catch (error) {
         if (error instanceof ParamError) return res.status(400).type('text/plain').send(error.message);
