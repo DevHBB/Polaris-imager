@@ -16,14 +16,25 @@ import { CONFIG, buildRendererConfig } from './config.mjs';
 import { parseAvatarParams, ParamError } from './params.mjs';
 import { encodeFrames } from './apng.mjs';
 import { BrowserPool } from './browser.mjs';
-import { createApiKeyGuard, createCors, createRateLimiter, loopbackOnly, securityHeaders } from './security.mjs';
+import { createApiKeyGuard, createCors, createRateLimiter, loopbackOnly, makeClientIp, securityHeaders } from './security.mjs';
+import { createAccessLogger } from './logger.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const harnessDir = resolve(here, '..', 'dist-harness');
 
-// --- tiny TTL + LRU response cache -------------------------------------------
+// --- tiny TTL + LRU response cache, bounded by entry count AND total bytes ----
 class ResponseCache {
     #map = new Map();
+    #bytes = 0;
+
+    #drop(key) {
+        const entry = this.#map.get(key);
+
+        if (entry) {
+            this.#bytes -= entry.size;
+            this.#map.delete(key);
+        }
+    }
 
     get(key) {
         if (CONFIG.cacheEntries <= 0) return null;
@@ -33,7 +44,7 @@ class ResponseCache {
         if (!entry) return null;
 
         if (entry.expires < Date.now()) {
-            this.#map.delete(key);
+            this.#drop(key);
 
             return null;
         }
@@ -48,10 +59,21 @@ class ResponseCache {
     set(key, value) {
         if (CONFIG.cacheEntries <= 0) return;
 
-        this.#map.set(key, { value, expires: Date.now() + CONFIG.cacheTtlMs });
+        const size = value.buffer?.length || 0;
 
-        while (this.#map.size > CONFIG.cacheEntries) {
-            this.#map.delete(this.#map.keys().next().value);
+        // A single item larger than the whole budget is never cached.
+        if (CONFIG.cacheMaxBytes > 0 && size > CONFIG.cacheMaxBytes) return;
+
+        this.#drop(key);
+        this.#map.set(key, { value, size, expires: Date.now() + CONFIG.cacheTtlMs });
+        this.#bytes += size;
+
+        while (this.#map.size > CONFIG.cacheEntries || (CONFIG.cacheMaxBytes > 0 && this.#bytes > CONFIG.cacheMaxBytes)) {
+            const oldest = this.#map.keys().next().value;
+
+            if (oldest === undefined) break;
+
+            this.#drop(oldest);
         }
     }
 }
@@ -73,11 +95,38 @@ app.disable('x-powered-by');
 app.disable('etag'); // we set strong ETags ourselves on images
 app.set('trust proxy', CONFIG.trustProxy);
 
-const rateLimiter = createRateLimiter({ windowMs: CONFIG.rateLimitWindowMs, max: CONFIG.rateLimitMax });
+const clientIp = makeClientIp(CONFIG.clientIpHeader);
+const rateLimiter = createRateLimiter({ windowMs: CONFIG.rateLimitWindowMs, max: CONFIG.rateLimitMax, clientIp });
 const cors = createCors(CONFIG.corsOrigin);
 const apiKeyGuard = createApiKeyGuard(CONFIG.apiKeys);
 
 app.use(securityHeaders);
+
+// Access log: who accessed what. Skips health checks to stay readable, and
+// redacts any ?key= so API keys never land in the logs. Writes to a rotating
+// file when AVATAR_IMAGING_LOG_FILE is set, otherwise to stdout.
+const accessLogger = createAccessLogger(CONFIG);
+
+if (CONFIG.accessLog) {
+    app.use((req, res, next) => {
+        // Skip health checks and the loopback-only internal routes (the pool
+        // loading the harness) so the log is just real client traffic.
+        if (req.path === '/health' || req.path === '/renderer-config.json' || req.path.startsWith('/harness')) return next();
+
+        const start = Date.now();
+
+        res.on('finish', () => {
+            const url = req.originalUrl.replace(/([?&]key=)[^&]*/i, '$1***');
+            const bytes = res.get('content-length') || 0;
+            const cacheState = res.get('X-Cache') || '-';
+            const stamp = new Date().toISOString();
+
+            accessLogger.write(`${stamp} [access] ${clientIp(req)} ${req.method} ${url} -> ${res.statusCode} ${bytes}b ${cacheState} ${Date.now() - start}ms`);
+        });
+
+        next();
+    });
+}
 
 app.get('/health', (req, res) => {
     res.json({ status: ready ? 'ok' : 'starting', ready, poolSize: CONFIG.poolSize });
@@ -353,6 +402,7 @@ const start = async () => {
     const shutdown = async () => {
         console.log('[avatar-imaging] shutting down...');
         server.close();
+        accessLogger.close();
 
         try {
             await pool.close();

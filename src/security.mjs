@@ -6,6 +6,24 @@ const isLoopback = (ip) => {
     return ip === '::1' || ip === '::ffff:127.0.0.1' || ip.startsWith('127.');
 };
 
+// Resolve the real client IP. When a header is configured (e.g. cf-connecting-ip
+// behind Cloudflare, or x-forwarded-for behind nginx) use its first value;
+// otherwise fall back to req.ip (which honours Express `trust proxy`).
+export const makeClientIp = (headerName) => (req) => {
+    if (headerName) {
+        const raw = req.headers[headerName];
+
+        if (raw) {
+            const value = Array.isArray(raw) ? raw[0] : raw;
+            const first = String(value).split(',')[0].trim();
+
+            if (first) return first;
+        }
+    }
+
+    return req.ip || req.socket?.remoteAddress || 'unknown';
+};
+
 // Restrict a route to local callers only. Uses the real socket peer (not req.ip,
 // which honours X-Forwarded-For and could be spoofed) — the harness pages load
 // these routes from 127.0.0.1, so nothing external should ever reach them.
@@ -57,9 +75,10 @@ export const createApiKeyGuard = (keys) => {
 // Per-IP fixed-window rate limiter. No external store — a Map with lazy pruning,
 // which is fine for a single instance. Front with a shared limiter (nginx/CDN)
 // if you run several instances.
-export const createRateLimiter = ({ windowMs, max }) => {
+export const createRateLimiter = ({ windowMs, max, clientIp }) => {
     if (!max || max <= 0) return (req, res, next) => next();
 
+    const resolveIp = clientIp || ((req) => req.ip || req.socket?.remoteAddress || 'unknown');
     const hits = new Map();
 
     const prune = (now) => {
@@ -73,7 +92,7 @@ export const createRateLimiter = ({ windowMs, max }) => {
 
         if (hits.size > 10000) prune(now);
 
-        const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+        const ip = resolveIp(req);
         let entry = hits.get(ip);
 
         if (!entry || entry.reset <= now) {

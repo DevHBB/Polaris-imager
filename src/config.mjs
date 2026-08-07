@@ -82,9 +82,16 @@ export const CONFIG = {
     animationFps: int(env.AVATAR_IMAGING_FPS, 12),
     maxFrames: int(env.AVATAR_IMAGING_MAX_FRAMES, 60),
 
-    // Response cache (in-memory LRU keyed by the full query). 0 disables it.
+    // Response cache (in-memory LRU keyed by the full query). Bounded by BOTH an
+    // entry count and a total byte budget; 0 entries disables it.
     cacheEntries: int(env.AVATAR_IMAGING_CACHE_ENTRIES, 512),
+    cacheMaxBytes: int(env.AVATAR_IMAGING_CACHE_MAX_BYTES, 256 * 1024 * 1024),
     cacheTtlMs: int(env.AVATAR_IMAGING_CACHE_TTL_MS, 5 * 60 * 1000),
+
+    // Recycle (close + recreate) a renderer page after this many renders, to cap
+    // the memory a page accumulates from caching every asset it has ever drawn.
+    // 0 disables recycling (memory then grows with the variety of requests).
+    pageMaxRenders: int(env.AVATAR_IMAGING_PAGE_MAX_RENDERS, 500),
 
     // Optional fixed output canvas per set type. Leave unset for content-tight
     // output (cropped to the avatar, like the in-client thumbnails); set to
@@ -105,6 +112,21 @@ export const CONFIG = {
     // Behind a reverse proxy set this so the real client IP (X-Forwarded-For)
     // is used for rate limiting. Value: "true", a hop count, or a subnet.
     trustProxy: trustProxy(env.AVATAR_IMAGING_TRUST_PROXY),
+
+    // Header carrying the real client IP behind a proxy/CDN, used for logging
+    // and rate limiting. e.g. "cf-connecting-ip" (Cloudflare) or
+    // "x-forwarded-for". Empty => req.ip (honours trustProxy for XFF).
+    clientIpHeader: (env.AVATAR_IMAGING_CLIENT_IP_HEADER || '').toLowerCase().trim(),
+
+    // Log each request with the client IP, method, path, status, cache + timing.
+    // On by default; set to 0 to silence.
+    accessLog: env.AVATAR_IMAGING_ACCESS_LOG === undefined ? true : bool(env.AVATAR_IMAGING_ACCESS_LOG),
+
+    // Write the access log to a file with built-in size-based rotation. Unset =>
+    // log to stdout (let journald/Docker capture it). Rotates to <file>.1..N.
+    logFile: env.AVATAR_IMAGING_LOG_FILE || null,
+    logMaxBytes: int(env.AVATAR_IMAGING_LOG_MAX_BYTES, 10 * 1024 * 1024),
+    logMaxFiles: int(env.AVATAR_IMAGING_LOG_MAX_FILES, 5),
 
     // Per-IP rate limit (fixed window). Set max to 0 to disable.
     rateLimitWindowMs: int(env.AVATAR_IMAGING_RATELIMIT_WINDOW_MS, 60000),

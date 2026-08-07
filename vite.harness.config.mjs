@@ -61,7 +61,12 @@ const alias = {
     '@nitrots/utils': resolve(RENDERER, 'packages/utils/src/index.ts'),
     'pixi.js': resolve(RENDERER, 'node_modules', 'pixi.js'),
     'pixi-filters': resolve(RENDERER, 'node_modules', 'pixi-filters'),
-    'howler': resolve(RENDERER, 'node_modules', 'howler')
+    'howler': resolve(RENDERER, 'node_modules', 'howler'),
+    // The renderer's WebP/AVIF decoders are lazy (`await import(...)`) and never
+    // run on the avatar path — stub them so their multi-MB wasm stays out of the
+    // bundle.
+    'wasm-webp': resolve(import.meta.dirname, 'harness', 'stubs', 'wasm-webp.js'),
+    '@jsquash/avif': resolve(import.meta.dirname, 'harness', 'stubs', 'jsquash-avif.js')
 };
 
 export default defineConfig({

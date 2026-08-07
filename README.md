@@ -178,6 +178,27 @@ that API, then points an `<img>` at this service to show the avatar.
 - **Rate limiting**: per-IP fixed window (`AVATAR_IMAGING_RATELIMIT_*`), 429 when
   exceeded. Behind a proxy set `AVATAR_IMAGING_TRUST_PROXY` so the real client IP
   is used.
+- **Real client IP behind a CDN**: set `AVATAR_IMAGING_CLIENT_IP_HEADER` to the
+  header your edge sets — `cf-connecting-ip` (Cloudflare) or `x-forwarded-for`
+  (nginx) — and both logging and rate limiting use it instead of the proxy's IP.
+- **Access log**: on by default (`AVATAR_IMAGING_ACCESS_LOG=0` to silence). One
+  line per client request with the resolved IP, method, path, status, cache hit,
+  and timing (any `?key=` is redacted):
+
+  ```
+  [access] 203.0.113.99 GET /avatarimage?figure=hd-180-1&size=l -> 200 5183b HIT 1ms
+  ```
+
+  Health checks and the internal harness/config routes are excluded to keep it
+  readable. By default it goes to stdout (systemd journal, Docker logs, etc.).
+
+  **Log rotation**: set `AVATAR_IMAGING_LOG_FILE` to write to a file with
+  built-in size-based rotation — it rolls to `<file>.1 … <file>.N` at
+  `AVATAR_IMAGING_LOG_MAX_BYTES` (default 10 MB), keeping
+  `AVATAR_IMAGING_LOG_MAX_FILES` (default 5). No external tooling needed, so it
+  works the same in Docker. If you'd rather rotate by time with the OS, use
+  [`deploy/logrotate.example`](deploy/logrotate.example) (with `copytruncate`)
+  and set a large `LOG_MAX_BYTES` so the built-in rotation stays out of the way.
 - **Load shedding**: the render queue is bounded (`AVATAR_IMAGING_MAX_QUEUE`); a
   flood of unique (cache-missing) requests gets 503 instead of exhausting CPU.
 - **No info leak**: render errors return a generic message; details are logged
@@ -201,11 +222,43 @@ Rendering is the only expensive part, so caching is what keeps CPU low:
    public, max-age=…`. Conditional requests (`If-None-Match`) get a cheap `304`.
    **Put a reverse proxy or CDN in front** (nginx `proxy_cache`, Varnish,
    Cloudflare) and the vast majority of requests are served from that cache —
-   they never reach Node or the renderer at all. This is the real offload.
+   they never reach Node or the renderer at all. This is the real offload. A
+   ready-to-adapt config (proxy cache, cache-lock, rate limit, real-IP
+   forwarding, blocked internal routes) is in
+   [`deploy/nginx.conf.example`](deploy/nginx.conf.example) — bind the service to
+   `127.0.0.1` and let nginx face the internet.
 
 Because a given figure+params always produces the same image, cache lifetimes
 can be long. If a user changes their look the URL changes (different `figure`),
 so you rarely need to invalidate; lower `max-age` only if you regenerate assets.
+
+### Memory & sizing
+
+Most of the footprint is Chromium — each pool page is a full renderer instance.
+
+| Part | Rough RAM |
+| ---- | --------- |
+| Node process | ~60–90 MB |
+| Chromium (browser + `AVATAR_IMAGING_POOL` pages) | ~250 MB + ~250–500 MB per page |
+| Response cache | up to `AVATAR_IMAGING_CACHE_MAX_BYTES` (default 256 MB) |
+
+So a default **pool of 2 sits around ~1–1.5 GB warmed**, growing ~linearly with
+the pool size. **Budget ~1.5–2 GB** for a small deploy; give it more if you
+raise `AVATAR_IMAGING_POOL`.
+
+Each renderer page caches every clothing/effect texture it has ever drawn and
+never evicts, so without limits a long-running page creeps upward with the
+*variety* of requests. Two bounds keep it flat:
+
+- **`AVATAR_IMAGING_PAGE_MAX_RENDERS`** (default 500) — recycles a page (close +
+  recreate) after N renders, releasing its accumulated assets. Set `0` to
+  disable if you have plenty of RAM and want to avoid the occasional recycle.
+- **`AVATAR_IMAGING_CACHE_MAX_BYTES`** (default 256 MB) — hard cap on the
+  in-memory image cache, evicted LRU alongside the entry-count cap.
+
+Tuning: lower `AVATAR_IMAGING_POOL` (fewer concurrent renders, less RAM), lower
+`PAGE_MAX_RENDERS` (recycle sooner, flatter memory, slightly more churn), or lean
+harder on the nginx/CDN cache so fewer requests hit the renderer at all.
 
 ## Notes & limitations
 

@@ -101,7 +101,7 @@ export class BrowserPool {
         for (let i = 0; i < CONFIG.poolSize; i++) {
             const page = await this.#createPage();
 
-            this.#pages.push({ page, busy: false });
+            this.#pages.push({ page, busy: false, renders: 0 });
         }
     }
 
@@ -160,7 +160,7 @@ export class BrowserPool {
         return new Promise((resolve) => this.#waiters.push(resolve));
     }
 
-    #release(entry) {
+    #handOff(entry) {
         const waiter = this.#waiters.shift();
 
         if (waiter) {
@@ -170,7 +170,21 @@ export class BrowserPool {
         }
     }
 
+    #release(entry) {
+        // Recycle a page that has drawn enough renders, to release the assets it
+        // has accumulated. It stays busy until the fresh page is ready.
+        if (CONFIG.pageMaxRenders > 0 && entry.renders >= CONFIG.pageMaxRenders) {
+            this.#recycle(entry).finally(() => this.#handOff(entry));
+
+            return;
+        }
+
+        this.#handOff(entry);
+    }
+
     async #recycle(entry) {
+        entry.renders = 0;
+
         try {
             await entry.page.close();
         } catch {
@@ -192,6 +206,8 @@ export class BrowserPool {
                 entry.page.evaluate((p) => window.__nitroRenderAvatar(p), params),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('render timed out')), CONFIG.renderTimeoutMs))
             ]);
+
+            entry.renders += 1;
 
             return result;
         } catch (error) {
