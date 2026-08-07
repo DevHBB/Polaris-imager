@@ -49,6 +49,9 @@ the APNG lines up automatically.
 | `frame_num`      | `0`     | Which frame to output for a *still* image |
 | `img_format`     | `auto`  | `png`, `apng`, or `auto` (APNG when the pose animates) |
 | `gender`         | none    | `M`/`F`/`U` — normally inferred from the figure |
+| `text`           | none    | Speech-bubble text shown above the avatar |
+| `text_color`     | `000000`| Bubble text colour (hex, `rgb` or `rrggbb`) |
+| `bubble_color`   | `ffffff`| Bubble background colour (hex) |
 
 **Actions** (comma-separated in `action=`):
 
@@ -59,6 +62,19 @@ the APNG lines up automatically.
 Response is `image/png` (an APNG is a valid PNG). `X-Animated: true|false` tells
 you which you got.
 
+**Speech bubble**: `text=` draws a Habbo-style rounded balloon (with a downward
+tail) centred above the avatar; the canvas grows to fit it and it's overlaid on
+every animation frame. Colours are configurable via `text_color`/`bubble_color`.
+Text length is capped by `AVATAR_IMAGING_MAX_TEXT_LEN` (default 100) and long
+lines wrap automatically.
+
+- **Spaces**: URL-encode them — `text=Hello%20World` (or `+`: `text=Hello+World`).
+- **Line breaks**: use `%0A`, or a literal `\n` in the query —
+  `text=Hello%0AWorld` or `text=Hello\nWorld` both render two centred lines.
+
+**Requires a font on the server** — see the Ubuntu deploy step (install
+`fonts-dejavu-core`); without one the bubble renders empty text.
+
 **Examples**
 
 ```
@@ -66,6 +82,7 @@ you which you got.
 /avatarimage?figure=...&action=wlk,wav&direction=4&size=l
 /avatarimage?figure=...&action=sit&gesture=sml&headonly=1
 /avatarimage?figure=...&dance=1&effect=2&img_format=apng
+/avatarimage?figure=...&text=Hello!&bubble_color=2266cc&text_color=ffffff
 ```
 
 ### Other routes
@@ -181,6 +198,9 @@ sudo -u avatar bash -lc '
 sudo PLAYWRIGHT_BROWSERS_PATH=/opt/avatar-imaging/pw-browsers \
      npx --yes playwright install --with-deps chromium
 sudo chown -R avatar:avatar /opt/avatar-imaging/pw-browsers
+
+# 5b. A font so the text= speech-bubble feature renders (skip if unused)
+sudo apt-get install -y fonts-dejavu-core
 
 # 6. Build the harness bundle
 sudo -u avatar bash -lc 'cd /opt/avatar-imaging && npm run build:harness'

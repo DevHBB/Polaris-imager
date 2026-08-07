@@ -57,6 +57,19 @@ const FIGURE_RE = /^[A-Za-z0-9._-]+$/;
 const ACTION_RE = /^[A-Za-z0-9._,=-]*$/;
 const MAX_ACTION_TOKENS = 24;
 
+const HEX_COLOR_RE = /^([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+// Parse a #rrggbb / rgb / rrggbb colour into a 0xRRGGBB number, else fallback.
+const parseHexColor = (value, fallback) => {
+    let hex = (value ?? '').toString().trim().replace(/^#/, '');
+
+    if (!HEX_COLOR_RE.test(hex)) return fallback;
+
+    if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+
+    return parseInt(hex, 16);
+};
+
 const clampDirection = (value, fallback) => {
     const n = parseInt(value, 10);
 
@@ -79,7 +92,7 @@ const clampInt = (value, fallback, min, max) => {
 
 const first = (value) => (Array.isArray(value) ? value[0] : value);
 
-export const parseAvatarParams = (query, { defaultFigure = null, maxFigureLength = 512, maxActionLength = 256 } = {}) => {
+export const parseAvatarParams = (query, { defaultFigure = null, maxFigureLength = 512, maxActionLength = 256, maxTextLength = 100 } = {}) => {
     const figure = (first(query.figure) ?? '').trim() || defaultFigure;
 
     if (!figure) throw new ParamError('Missing required "figure" parameter.');
@@ -151,6 +164,19 @@ export const parseAvatarParams = (query, { defaultFigure = null, maxFigureLength
         }
     }
 
+    // Optional speech bubble above the avatar. Line breaks are supported via a
+    // real newline (%0A) or a literal "\n" in the query; all other control chars
+    // are stripped. The text is rendered as an image (never interpreted).
+    const text = (first(query.text) ?? '')
+        .toString()
+        .replace(/\\n/g, '\n')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, ' ')
+        .slice(0, maxTextLength)
+        .trim() || null;
+    const textColor = parseHexColor(first(query.text_color), 0x000000);
+    const bubbleColor = parseHexColor(first(query.bubble_color), 0xffffff);
+
     return {
         figure,
         gender,
@@ -166,6 +192,9 @@ export const parseAvatarParams = (query, { defaultFigure = null, maxFigureLength
         effect,
         expressions,
         handItem,
-        format
+        format,
+        text,
+        textColor,
+        bubbleColor
     };
 };

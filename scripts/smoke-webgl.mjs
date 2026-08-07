@@ -66,6 +66,12 @@ try {
     assert.equal(result.height, 8);
     assert.ok(result.r > 200 && result.g < 60 && result.b < 60 && result.a > 200, 'expected an opaque red pixel');
 
+    if (result.textPixels > 0) {
+        console.log(`  text bubble rendered ${result.textPixels} glyph pixels (fonts OK)`);
+    } else {
+        console.warn('  WARNING: text bubble rendered no glyph pixels — no font installed? Install fonts-dejavu-core / fonts-liberation for the text= feature.');
+    }
+
     console.log('smoke-webgl: PASSED (pixi + SwiftShader WebGL render/readback works)');
 } finally {
     await browser.close();

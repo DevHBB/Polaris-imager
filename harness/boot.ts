@@ -16,7 +16,7 @@ import {
     PrepareRenderer,
     TextureUtils
 } from '@nitrots/nitro-renderer';
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics, Sprite, Text } from 'pixi.js';
 
 declare global {
     interface Window {
@@ -51,6 +51,9 @@ interface RenderParams {
     expressions: string[];
     handItem: { action: string; id: string } | null;
     format: string; // 'auto' | 'png' | 'apng'
+    text: string | null;
+    textColor: number;
+    bubbleColor: number;
 }
 
 interface RenderResult {
@@ -323,6 +326,79 @@ const unpremultiplyAlpha = (pixels: Uint8Array): Uint8Array => {
     return pixels;
 };
 
+interface Bubble {
+    texture: any;
+    width: number;
+    height: number;
+}
+
+// Draw a Habbo-style speech balloon (rounded rect + downward tail) with the
+// text inside, into its own texture. Rendered once and overlaid on every frame.
+const buildTextBubble = (text: string, textColor: number, bubbleColor: number): Bubble | null => {
+    const padX = 9;
+    const padY = 6;
+    const radius = 9;
+    const tailW = 12;
+    const tailH = 9;
+    const border = 0x000000;
+
+    const label = new Text({
+        text,
+        style: {
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            fontSize: 14,
+            fontWeight: 'bold',
+            fill: textColor,
+            align: 'center',
+            wordWrap: true,
+            wordWrapWidth: 220,
+            breakWords: true
+        } as any
+    });
+
+    const textW = Math.ceil(label.width);
+    const textH = Math.ceil(label.height);
+    const bodyW = textW + padX * 2;
+    const bodyH = textH + padY * 2;
+    const totalW = bodyW + 2; // room for the 1px stroke
+    const totalH = bodyH + tailH + 2;
+    const cx = bodyW / 2;
+
+    const graphics = new Graphics();
+
+    graphics
+        .roundRect(1, 1, bodyW, bodyH, radius)
+        .fill({ color: bubbleColor })
+        .stroke({ color: border, width: 1, alignment: 0.5 });
+
+    // Downward tail, centred under the body.
+    graphics
+        .moveTo(cx - tailW / 2, bodyH)
+        .lineTo(cx + tailW / 2, bodyH)
+        .lineTo(cx, bodyH + tailH)
+        .closePath()
+        .fill({ color: bubbleColor })
+        .stroke({ color: border, width: 1 });
+
+    // Cover the seam where the tail meets the body so no border line shows through.
+    graphics.rect(cx - tailW / 2 + 1, bodyH - 1, tailW - 2, 2).fill({ color: bubbleColor });
+
+    label.x = 1 + padX;
+    label.y = 1 + padY;
+
+    const container = new Container();
+
+    container.addChild(graphics);
+    container.addChild(label);
+
+    const texture = TextureUtils.createAndWriteRenderTexture(totalW, totalH, container);
+    const bubble: Bubble = { texture, width: texture.width, height: texture.height };
+
+    container.destroy({ children: true });
+
+    return bubble;
+};
+
 // Composite one frame's placements (avatar + effect layers, back-to-front) into
 // a texture of the given region and read back the pixels.
 const compositeFrame = (placements: Placement[], rx: number, ry: number, rw: number, rh: number): Frame => {
@@ -363,7 +439,7 @@ const compositeFrame = (placements: Placement[], rx: number, ry: number, rw: num
 // Render every frame by compositing the avatar figure with its effect layers,
 // into a texture sized to the union of all frames' bounds (so effect sprites
 // that extend past the avatar box are included and frames stay the same size).
-const renderFrames = (avatarImage: any, setType: string, absoluteFrames: number[]): Frame[] => {
+const renderFrames = (avatarImage: any, setType: string, absoluteFrames: number[], bubble: Bubble | null = null): Frame[] => {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -387,13 +463,36 @@ const renderFrames = (avatarImage: any, setType: string, absoluteFrames: number[
 
     if (!Number.isFinite(minX)) return [{ pixels: new Uint8Array(4), width: 1, height: 1 }];
 
+    // Position the speech bubble centred above the avatar, and grow the canvas to
+    // fit it. It's a static overlay drawn on top of every frame.
+    let bubblePlacement: Placement | null = null;
+
+    if (bubble) {
+        const bubbleGap = 2;
+        const bx = Math.round((minX + maxX) / 2 - bubble.width / 2);
+        const by = Math.round(minY - bubble.height - bubbleGap);
+
+        bubblePlacement = { texture: bubble.texture, x: bx, y: by, depth: -1e9, flipH: false, blend: 'normal', key: 'bubble', isBody: false };
+
+        minX = Math.min(minX, bx);
+        minY = Math.min(minY, by);
+        maxX = Math.max(maxX, bx + bubble.width);
+        maxY = Math.max(maxY, by + bubble.height);
+    }
+
     const rx = Math.floor(minX);
     const ry = Math.floor(minY);
     const rw = Math.max(1, Math.ceil(maxX) - rx);
     const rh = Math.max(1, Math.ceil(maxY) - ry);
 
-    // Pass 2: composite each frame.
-    return absoluteFrames.map((frame) => compositeFrame(collectPlacements(avatarImage, setType, frame), rx, ry, rw, rh));
+    // Pass 2: composite each frame (bubble drawn last/on top via its low depth).
+    return absoluteFrames.map((frame) => {
+        const placements = collectPlacements(avatarImage, setType, frame);
+
+        if (bubblePlacement) placements.push(bubblePlacement);
+
+        return compositeFrame(placements, rx, ry, rw, rh);
+    });
 };
 
 // Union of opaque pixels across all frames (used to crop head-only output to
@@ -510,7 +609,17 @@ const renderAvatar = async (params: RenderParams): Promise<RenderResult> => {
             ? Array.from({ length: frameCount }, (_, i) => i)
             : [params.frameNum];
 
-        let frames = renderFrames(avatarImage, setType, absoluteFrames);
+        const bubble = params.text ? buildTextBubble(params.text, params.textColor, params.bubbleColor) : null;
+
+        let frames = renderFrames(avatarImage, setType, absoluteFrames, bubble);
+
+        if (bubble) {
+            try {
+                bubble.texture.destroy(true);
+            } catch {
+                // best effort
+            }
+        }
 
         if (setType === AvatarSetType.HEAD) {
             const box = unionOpaqueBox(frames);
@@ -670,13 +779,35 @@ const boot = async (): Promise<void> => {
         const texture = TextureUtils.createAndWriteRenderTexture(8, 8, graphics);
         const data = TextureUtils.getPixels(texture);
 
+        // Also render a text bubble and count opaque + non-background pixels, to
+        // confirm text (fonts) actually rasterizes in this Chromium.
+        let textPixels = 0;
+
+        try {
+            const bubble = buildTextBubble('Ag', 0x000000, 0xffffff);
+
+            if (bubble) {
+                const bp = TextureUtils.getPixels(bubble.texture).pixels as Uint8Array;
+
+                for (let i = 0; i < bp.length; i += 4) {
+                    // count dark (text) pixels that aren't the white bubble body
+                    if (bp[i + 3] > 128 && bp[i] < 128) textPixels++;
+                }
+
+                bubble.texture.destroy(true);
+            }
+        } catch {
+            textPixels = -1;
+        }
+
         window.__SELFTEST_RESULT__ = {
             width: data.width,
             height: data.height,
             r: data.pixels[0],
             g: data.pixels[1],
             b: data.pixels[2],
-            a: data.pixels[3]
+            a: data.pixels[3],
+            textPixels
         };
         window.__NITRO_READY__ = true;
 

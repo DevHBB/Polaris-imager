@@ -151,7 +151,8 @@ export const CONFIG = {
 
     // Hard caps on user-controlled input.
     maxFigureLength: int(env.AVATAR_IMAGING_MAX_FIGURE_LEN, 512),
-    maxActionLength: int(env.AVATAR_IMAGING_MAX_ACTION_LEN, 256)
+    maxActionLength: int(env.AVATAR_IMAGING_MAX_ACTION_LEN, 256),
+    maxTextLength: int(env.AVATAR_IMAGING_MAX_TEXT_LEN, 100)
 };
 
 // The renderer config object served to the harness at /renderer-config.json.
