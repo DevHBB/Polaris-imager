@@ -150,6 +150,74 @@ CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome
 
 (The pool auto-detects `PLAYWRIGHT_BROWSERS_PATH` too.)
 
+## Deploying on Ubuntu (systemd)
+
+A hardened unit file is provided at
+[`deploy/avatar-imaging.service`](deploy/avatar-imaging.service). Full walkthrough
+(assumes the service lives at `/opt/avatar-imaging` and the renderer at
+`/opt/Nitro-Renderer` — adjust to taste):
+
+```sh
+# 1. Node 20 LTS + git
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+
+# 2. A dedicated, unprivileged user
+sudo useradd --system --home /opt/avatar-imaging --shell /usr/sbin/nologin avatar
+
+# 3. Put the code in place (copy/clone your renderer + this service), e.g.:
+sudo mkdir -p /opt/avatar-imaging /opt/Nitro-Renderer
+#   ...copy the avatar-imaging/ contents to /opt/avatar-imaging and the
+#      Nitro-Renderer/ contents to /opt/Nitro-Renderer...
+sudo chown -R avatar:avatar /opt/avatar-imaging /opt/Nitro-Renderer
+
+# 4. Install deps + link the renderer, as the service user
+sudo -u avatar bash -lc '
+  cd /opt/Nitro-Renderer && yarn install && yarn link
+  cd /opt/avatar-imaging && npm install && yarn link "@nitrots/nitro-renderer"
+'
+
+# 5. Install Chromium into the pinned browser path (root, for --with-deps libs)
+sudo PLAYWRIGHT_BROWSERS_PATH=/opt/avatar-imaging/pw-browsers \
+     npx --yes playwright install --with-deps chromium
+sudo chown -R avatar:avatar /opt/avatar-imaging/pw-browsers
+
+# 6. Build the harness bundle
+sudo -u avatar bash -lc 'cd /opt/avatar-imaging && npm run build:harness'
+
+# 7. Configure. Bind to loopback (nginx faces the internet) and set your hosts.
+sudo -u avatar cp /opt/avatar-imaging/.env.example /opt/avatar-imaging/.env
+sudo -u avatar $EDITOR /opt/avatar-imaging/.env
+#   AVATAR_IMAGING_HOST=127.0.0.1
+#   AVATAR_IMAGING_TRUST_PROXY=true
+#   AVATAR_IMAGING_CLIENT_IP_HEADER=x-forwarded-for   # or cf-connecting-ip
+#   AVATAR_IMAGING_LOG_FILE=/var/log/avatar-imaging/access.log
+#   NITRO_GAMEDATA_URL=... / NITRO_ASSET_URL=... (+ your overrides)
+
+# 8. Log directory
+sudo mkdir -p /var/log/avatar-imaging
+sudo chown avatar:avatar /var/log/avatar-imaging
+
+# 9. Install + start the service
+sudo cp /opt/avatar-imaging/deploy/avatar-imaging.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now avatar-imaging
+
+# 10. Verify
+systemctl status avatar-imaging
+journalctl -u avatar-imaging -f          # startup + operational logs
+curl -s http://127.0.0.1:8081/health     # {"status":"ok","ready":true,...}
+```
+
+The unit runs as the `avatar` user with `NoNewPrivileges`, `ProtectSystem=strict`,
+`ProtectHome`, `PrivateTmp`, a `MemoryMax=2G` ceiling, and auto-restart. The
+access log rotates itself (see above); operational logs go to the journal. Then
+put the [nginx config](deploy/nginx.conf.example) in front for TLS + caching.
+
+To update later: deploy the new code, then
+`sudo -u avatar bash -lc 'cd /opt/avatar-imaging && npm run build:harness'` and
+`sudo systemctl restart avatar-imaging`.
+
 ## Using it from a CMS
 
 The service is a plain HTTP image endpoint, so a CMS just uses it as an `<img>`
