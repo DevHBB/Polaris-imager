@@ -109,9 +109,9 @@ const accessLogger = createAccessLogger(CONFIG);
 
 if (CONFIG.accessLog) {
     app.use((req, res, next) => {
-        // Skip health checks and the loopback-only internal routes (the pool
-        // loading the harness) so the log is just real client traffic.
-        if (req.path === '/health' || req.path === '/renderer-config.json' || req.path.startsWith('/harness')) return next();
+        // Skip health checks, favicon, and the loopback-only internal routes
+        // (the pool loading the harness) so the log is just real client traffic.
+        if (req.path === '/health' || req.path === '/favicon.ico' || req.path === '/renderer-config.json' || req.path.startsWith('/harness')) return next();
 
         const start = Date.now();
 
@@ -131,6 +131,10 @@ if (CONFIG.accessLog) {
 app.get('/health', (req, res) => {
     res.json({ status: ready ? 'ok' : 'starting', ready, poolSize: CONFIG.poolSize });
 });
+
+// Browsers (incl. the headless harness page) auto-request this; answer 204 so it
+// isn't a 404 in the logs / harness console.
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // Internal routes: only the local headless Chromium needs these, and the config
 // exposes internal gamedata/asset hosts — never serve them to the public.
@@ -172,19 +176,12 @@ app.get('/', (req, res) => {
     );
 });
 
-// Send a rendered PNG/APNG with strong caching (ETag + 304 for conditional GETs
-// and a matching Cache-Control so a reverse proxy/CDN and browsers can cache —
-// the real CPU offload, since repeat requests never reach the renderer).
-const sendImage = (req, res, buffer, animated, cacheState) => {
-    const etag = `"${createHash('sha1').update(buffer).digest('base64')}"`;
-
-    res.set('ETag', etag);
-    res.set('Cache-Control', `public, max-age=${Math.floor(CONFIG.cacheTtlMs / 1000)}`);
+// Send a rendered PNG/APNG. ETag/Cache-Control are already set by the handler
+// (derived from the request), so a reverse proxy/CDN and browsers cache — the
+// real CPU offload, since repeat requests never reach the renderer.
+const sendImage = (res, buffer, animated, cacheState) => {
     res.set('X-Animated', String(animated));
     res.set('X-Cache', cacheState);
-
-    if (req.headers['if-none-match'] === etag) return res.status(304).end();
-
     res.type('image/png');
 
     return res.send(buffer);
@@ -206,9 +203,23 @@ app.get('/avatarimage', cors, rateLimiter, apiKeyGuard, async (req, res) => {
     }
 
     const cacheKey = JSON.stringify(descriptor);
+
+    // ETag is derived from the request (+ asset version), not the rendered bytes,
+    // so a conditional request is answered 304 WITHOUT rendering.
+    const etag = `"${createHash('sha1').update(`${cacheKey}|${CONFIG.assetVersion}`).digest('base64')}"`;
+
+    res.set('ETag', etag);
+    res.set('Cache-Control', `public, max-age=${Math.floor(CONFIG.cacheTtlMs / 1000)}`);
+
+    if (req.headers['if-none-match'] === etag) {
+        res.set('X-Cache', 'REVALIDATED');
+
+        return res.status(304).end();
+    }
+
     const cached = cache.get(cacheKey);
 
-    if (cached) return sendImage(req, res, cached.buffer, cached.animated, 'HIT');
+    if (cached) return sendImage(res, cached.buffer, cached.animated, 'HIT');
 
     if (!ready) return res.status(503).type('text/plain').send('Renderer still starting, try again shortly.');
 
@@ -231,7 +242,7 @@ app.get('/avatarimage', cors, rateLimiter, apiKeyGuard, async (req, res) => {
 
         cache.set(cacheKey, { buffer, animated: rendered.animated });
 
-        return sendImage(req, res, buffer, rendered.animated, 'MISS');
+        return sendImage(res, buffer, rendered.animated, 'MISS');
     } catch (error) {
         // Overloaded: the render queue is full — shed load.
         if (error?.code === 'OVERLOADED') {

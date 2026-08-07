@@ -93,6 +93,11 @@ export const CONFIG = {
     // 0 disables recycling (memory then grows with the variety of requests).
     pageMaxRenders: int(env.AVATAR_IMAGING_PAGE_MAX_RENDERS, 500),
 
+    // ETag salt. The ETag is derived from the request params so conditional
+    // requests can be answered 304 without rendering. Bump this (any string)
+    // when you regenerate gamedata/assets, to invalidate clients' cached copies.
+    assetVersion: (env.AVATAR_IMAGING_ASSET_VERSION || '').trim(),
+
     // Optional fixed output canvas per set type. Leave unset for content-tight
     // output (cropped to the avatar, like the in-client thumbnails); set to
     // "width,height" to pad/anchor every image to a fixed box so a CMS grid

@@ -286,8 +286,14 @@ Rendering is the only expensive part, so caching is what keeps CPU low:
 
 1. **In-memory LRU + TTL** (`AVATAR_IMAGING_CACHE_*`): identical requests are
    served from memory and never re-rendered.
-2. **HTTP caching**: every image carries a strong `ETag` and a `Cache-Control:
-   public, max-age=…`. Conditional requests (`If-None-Match`) get a cheap `304`.
+2. **HTTP caching**: every image carries an `ETag` (derived from the request, so
+   a conditional `If-None-Match` is answered `304` **without rendering** — ~1 ms
+   instead of a full render) and a `Cache-Control: public, max-age=…`.
+   The `X-Cache` header (and access log) shows which path a request took:
+   `HIT` (served from the in-memory cache), `MISS` (rendered fresh), or
+   `REVALIDATED` (304, client's copy still valid — no render, no bytes).
+   Because the ETag is request-based, bump `AVATAR_IMAGING_ASSET_VERSION` when
+   you regenerate gamedata/assets to invalidate clients' cached copies.
    **Put a reverse proxy or CDN in front** (nginx `proxy_cache`, Varnish,
    Cloudflare) and the vast majority of requests are served from that cache —
    they never reach Node or the renderer at all. This is the real offload. A
