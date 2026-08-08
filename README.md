@@ -29,31 +29,30 @@ deploy — worthwhile at volume (e.g. ~10k renders/day).
 
 ## Prerequisites
 
-- **Node 20+ (22 recommended).**
-- **Native build toolchain** — `@pixi/node@8` declares its natives as *peer*
-  deps, so this package lists them explicitly: `canvas` (node-canvas `^3.2.0`)
-  and `gl` (headless-gl `^8.1.6`). Both compile from source on `npm install`:
-  - Debian/Ubuntu:
+- **Node 20+ (22 recommended on Linux; use Node 20 LTS on Windows — `gl`'s
+  prebuilt binaries need it, see [Windows](#windows)).**
+- **Native modules** — `@pixi/node@8` declares its natives as *peer* deps, so
+  this package lists them explicitly: `canvas` (node-canvas `^3.2.0`) and `gl`
+  (headless-gl `^8.1.6`). `npm install` uses a prebuilt binary when one exists
+  for your OS + Node version, and only compiles from source as a fallback.
+  - **Debian/Ubuntu** (production target):
     ```
     sudo apt-get install -y build-essential python3 pkg-config \
       libcairo2-dev libpango1.0-dev libjpeg-dev libpng-dev libgif-dev librsvg2-dev \
       libgl1-mesa-dev libxi-dev libxext-dev libx11-dev \
-      fonts-liberation
+      fonts-liberation xvfb
     ```
-  - `fonts-liberation` is for the speech-bubble text (`?text=`): node-canvas has
-    no bundled fonts, so `node-env.ts` registers Liberation Sans (Arial-metric-
-    compatible) as family "Arial". Without a font installed the bubble is blank —
-    or set `AVATAR_IMAGING_FONT_FILE` to a specific `.ttf` for byte-identical text.
+    `xvfb` gives headless-gl a virtual display — run every command under
+    `xvfb-run -a` (see below). `fonts-liberation` is the speech-bubble font.
+  - **Windows / macOS:** see [Windows](#windows) below (no `xvfb`; Arial is
+    already installed for the bubble text). macOS: `brew install pkg-config cairo
+    pango libpng jpeg giflib librsvg`.
   - (`pixi.js` comes from the linked renderer; `cross-fetch` / `@xmldom/xmldom`
     are shimmed at build time — see `harness/stubs/`.)
-- **`xvfb` (headless).** Depending on your GL stack, headless-gl may need an X
-  display to create its context. Running under `xvfb-run -a` is the safe default:
-  ```
-  sudo apt-get install -y xvfb
-  ```
-  (The old "pixi falls back to a canvas renderer without a display" problem is
-  fixed in `node-env.ts` — the Node adapter is forced, not auto-detected — but
-  `gl` itself can still want a display on some systems.)
+- **Speech-bubble font.** node-canvas has no bundled fonts, so `node-env.ts`
+  registers a real `.ttf` as family "Arial" (`?text=` rendering). It auto-scans
+  the standard Linux (Liberation/DejaVu), Windows (`C:\Windows\Fonts\arial.ttf`)
+  and macOS Arial paths; set `AVATAR_IMAGING_FONT_FILE` for a specific file.
 - The **Nitro renderer**, linked exactly like the browser service / Nitro-UI:
   ```
   cd ../Nitro-Renderer && yarn install && yarn link
@@ -68,6 +67,65 @@ npm install                       # pulls @pixi/node (+ native gl/canvas), expre
 cp .env.example .env              # point NITRO_GAMEDATA_URL / NITRO_ASSET_URL at your hotel
 npm run build                     # bundles harness/boot-node.ts -> dist-node/boot-node.mjs
 ```
+
+## Windows
+
+Windows works for development/testing (production is Linux). headless-gl uses the
+GPU / ANGLE directly, so there is **no `xvfb`** — drop `xvfb-run` from every
+command below.
+
+1. **Use Node 20 LTS.** This matters: `gl` (headless-gl) only ships prebuilt
+   Windows binaries for LTS lines, and Node 20 has the widest coverage, so
+   `npm install` downloads a ready `.node` and **compiles nothing**. Do NOT use
+   Current/nightly (24, 26, …) — no prebuild exists for them, so npm falls back to
+   a source build that needs Python + Visual Studio and usually fails. Install the
+   "20.x LTS" build from [nodejs.org](https://nodejs.org), or with nvm-windows:
+   ```
+   nvm install 20
+   nvm use 20
+   node -v          :: must print v20.x
+   ```
+2. **Link the renderer** (Developer PowerShell, in the repo root):
+   ```
+   cd ..\Nitro-Renderer ; yarn install ; yarn link
+   cd ..\avatar-imaging-pixinode ; yarn link "@nitrots/nitro-renderer"
+   ```
+   (or set `NITRO_RENDERER_PATH` to the renderer folder.)
+3. **Install, configure, build:**
+   ```
+   npm install
+   copy .env.example .env      :: then edit NITRO_GAMEDATA_URL / NITRO_ASSET_URL
+   npm run build
+   ```
+   On Node 20 this pulls prebuilt `canvas` + `gl` binaries — no compiler needed.
+4. **Run** (no `xvfb`):
+   ```
+   npm start
+   :: or a one-shot render:
+   node render.mjs --figure=hd-180-1.ch-255-66.lg-280-110.sh-305-62 --out=out\plain.png
+   ```
+5. **Fonts:** Windows ships Arial, so bubble text (`?text=`) works out of the box
+   in real Arial — nothing to install.
+
+### Windows troubleshooting
+
+- **`prebuild-install ... No prebuilt binaries found (target=26.x ... platform=win32)`
+  then `gyp ERR! find Python ... Could not find any Python`.** You're on a Node
+  version with no `gl`/`canvas` prebuild, so it tried to compile from source.
+  **Fix: switch to Node 20 LTS**, delete `node_modules`, reinstall:
+  ```
+  nvm use 20
+  rmdir /s /q node_modules
+  yarn install        :: or npm install
+  ```
+- **Only if you must build from source** (staying on a non-LTS Node): install
+  **Python 3.12 from python.org** (tick *"Add python.exe to PATH"* — a Microsoft
+  Store Python or a broken install shows up as `find Python ... version is ""`),
+  and **Visual Studio Build Tools** with *"Desktop development with C++"*, then
+  `npm config set python "C:\Path\To\python.exe"` and reinstall. node-canvas from
+  source may also want the GTK bundle — see the
+  [node-canvas Windows wiki](https://github.com/Automattic/node-canvas/wiki/Installation:-Windows).
+  Node 20 + prebuilds avoids all of this.
 
 ## Run — HTTP service
 

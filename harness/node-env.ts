@@ -56,7 +56,9 @@ try {
         '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf',
         '/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf',
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/dejavu/DejaVuSans.ttf'
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        'C:\\Windows\\Fonts\\arial.ttf',
+        '/Library/Fonts/Arial.ttf'
     ]);
 
     const boldPath = firstExisting([
@@ -65,7 +67,9 @@ try {
         '/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf',
         '/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf',
         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-        '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf'
+        '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+        'C:\\Windows\\Fonts\\arialbd.ttf',
+        '/Library/Fonts/Arial Bold.ttf'
     ]);
 
     if (regularPath) registerFont(regularPath, { family: 'Arial', weight: 'normal' });
