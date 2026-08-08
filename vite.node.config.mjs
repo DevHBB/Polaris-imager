@@ -2,12 +2,6 @@ import { existsSync, realpathSync } from 'fs';
 import { resolve } from 'path';
 import { defineConfig } from 'vite';
 
-// Locate the renderer, consumed the same way the client does. Resolution order:
-//   1. NITRO_RENDERER_PATH env override (explicit path to the renderer root)
-//   2. the `yarn link "@nitrots/nitro-renderer"` symlink in node_modules
-//   3. a sibling ../Nitro-Renderer directory (the monorepo layout)
-// This way the service directory and the renderer can live anywhere, as long as
-// they're linked — exactly the Nitro-UI workflow.
 const resolveRenderer = () => {
     if (process.env.NITRO_RENDERER_PATH) return resolve(process.env.NITRO_RENDERER_PATH);
 
@@ -17,7 +11,6 @@ const resolveRenderer = () => {
         try {
             return realpathSync(linked);
         } catch {
-            // fall through
         }
     }
 
@@ -28,22 +21,13 @@ const RENDERER = resolveRenderer();
 
 if (!existsSync(resolve(RENDERER, 'index.ts'))) {
     throw new Error(
-        `[avatar-imaging] Nitro renderer not found at ${RENDERER}.\n` +
+        `[avatar-imaging-pixinode] Nitro renderer not found at ${RENDERER}.\n` +
         '  Link it (like Nitro-UI):  cd <renderer> && yarn install && yarn link\n' +
         '                            cd <this service> && yarn link "@nitrots/nitro-renderer"\n' +
         '  Or set NITRO_RENDERER_PATH to the renderer directory.'
     );
 }
 
-if (!existsSync(resolve(RENDERER, 'node_modules', 'pixi.js'))) {
-    throw new Error(`[avatar-imaging] Renderer dependencies not installed. Run: (cd ${RENDERER} && yarn install)`);
-}
-
-// Same alias map the client (Nitro-UI/vite.config.mjs) uses: force the @nitrots
-// packages to source (not a stale dist), and dedupe pixi/howler onto the
-// renderer's installed copy. Everything else the renderer imports (pako,
-// apng-js, @pixi/gif, wasm-webp, @jsquash/avif, strip-json-comments, …) resolves
-// naturally from the renderer's node_modules.
 const alias = {
     '@nitrots/nitro-renderer': resolve(RENDERER, 'index.ts'),
     '@nitrots/api': resolve(RENDERER, 'packages/api/src/index.ts'),
@@ -62,29 +46,34 @@ const alias = {
     'pixi.js': resolve(RENDERER, 'node_modules', 'pixi.js'),
     'pixi-filters': resolve(RENDERER, 'node_modules', 'pixi-filters'),
     'howler': resolve(RENDERER, 'node_modules', 'howler'),
-    // The renderer's WebP/AVIF decoders are lazy (`await import(...)`) and never
-    // run on the avatar path — stub them so their multi-MB wasm stays out of the
-    // bundle.
     'wasm-webp': resolve(import.meta.dirname, 'harness', 'stubs', 'wasm-webp.js'),
-    '@jsquash/avif': resolve(import.meta.dirname, 'harness', 'stubs', 'jsquash-avif.js')
+    '@jsquash/avif': resolve(import.meta.dirname, 'harness', 'stubs', 'jsquash-avif.js'),
+    'cross-fetch': resolve(import.meta.dirname, 'harness', 'stubs', 'cross-fetch.js'),
+    '@xmldom/xmldom': resolve(import.meta.dirname, 'harness', 'stubs', 'xmldom.js')
 };
 
 export default defineConfig({
-    root: resolve(import.meta.dirname, 'harness'),
-    base: './',
-    logLevel: 'info',
-    resolve: {
-        alias,
-        dedupe: ['pixi.js']
-    },
-    define: {
-        'process.env.NODE_ENV': JSON.stringify('production')
+    resolve: { alias, dedupe: ['pixi.js'] },
+    define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+    ssr: {
+        noExternal: true,
+        external: ['gl', 'canvas', 'node-gyp-build']
     },
     build: {
-        outDir: resolve(import.meta.dirname, 'dist-harness'),
+        ssr: resolve(import.meta.dirname, 'harness', 'boot-node.ts'),
+        outDir: resolve(import.meta.dirname, 'dist-node'),
         emptyOutDir: true,
-        target: 'esnext',
+        target: 'node20',
         sourcemap: false,
-        chunkSizeWarningLimit: 4096
+        minify: false,
+        rollupOptions: {
+            external: ['gl', 'canvas', 'node-gyp-build'],
+            treeshake: { moduleSideEffects: true },
+            output: {
+                format: 'es',
+                entryFileNames: 'boot-node.mjs',
+                inlineDynamicImports: true
+            }
+        }
     }
 });
