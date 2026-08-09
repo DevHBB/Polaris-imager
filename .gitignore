@@ -1,4 +1,4 @@
 node_modules/
-dist-harness/
+dist-node/
+out/
 .env
-*.log

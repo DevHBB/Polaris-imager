@@ -1,26 +1,28 @@
 {
-    "name": "avatar-imaging",
-    "version": "1.0.0",
+    "name": "avatar-imaging-pixinode",
+    "version": "0.1.0",
     "private": true,
     "type": "module",
-    "description": "Server-side avatar imaging API (Habbo habbo-imaging/avatarimage equivalent) for the Nitro renderer. Renders figures to PNG / animated APNG in headless Chromium for use with a CMS.",
+    "description": "Spike: render Nitro avatars server-side with @pixi/node (real WebGL, no headless browser).",
     "scripts": {
-        "build:harness": "vite build --config vite.harness.config.mjs",
-        "install:chromium": "npx --yes playwright install --with-deps chromium",
-        "prestart": "node scripts/ensure-harness.mjs",
+        "build": "vite build --config vite.node.config.mjs",
+        "render": "node render.mjs",
+        "spike": "npm run build && node render.mjs",
         "start": "node src/server.mjs",
-        "dev": "npm run build:harness && node src/server.mjs",
-        "smoke": "node scripts/smoke.mjs",
-        "smoke:webgl": "npm run build:harness && node scripts/smoke-webgl.mjs",
-        "test": "node scripts/smoke.mjs && npm run smoke:webgl"
+        "serve": "npm run build && node src/server.mjs"
     },
-    "comment": "The renderer is consumed via `yarn link \"@nitrots/nitro-renderer\"` and Vite aliases (see vite.harness.config.mjs), the same as Nitro-UI — so it is intentionally NOT a registry dependency here.",
+    "comment": "The renderer is consumed via Vite aliases (see vite.node.config.mjs) and @pixi/node is inlined into dist-node/boot-node.mjs at build time, so @pixi/node and pixi.js are BUILD-only (devDependencies). The runtime bundle imports only the native addons gl + canvas (kept external), which stay in dependencies with upng-js (APNG) and express (HTTP). This keeps the Docker runtime image to the runtime deps only.",
     "dependencies": {
+        "canvas": "^3.2.0",
         "express": "^4.21.2",
-        "playwright-core": "^1.49.1",
+        "gl": "^8.1.6",
         "upng-js": "^2.1.0"
     },
     "devDependencies": {
+        "@pixi/node": "^8.0.0",
+        "@xmldom/xmldom": "^0.8.11",
+        "cross-fetch": "^4.1.0",
+        "pixi.js": "^8.19.0",
         "vite": "^8.0.10"
     }
 }

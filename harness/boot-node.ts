@@ -1,11 +1,4 @@
-// Headless harness: boots the Nitro renderer in the page and exposes a single
-// render entry point the Node service drives via page.evaluate().
-//
-// The renderer here is the exact same code the client runs, so images are
-// pixel-identical to what a player sees in-game. Nothing in this file is
-// human-facing.
-
-// Consumed the same way the client does — from the linked renderer umbrella.
+import './node-env';
 import {
     AvatarAction,
     AvatarSetType,
@@ -39,8 +32,8 @@ declare global {
 interface RenderParams {
     figure: string;
     gender: string | null;
-    scale: string; // 'h' | 'sh'
-    setType: string; // 'full' | 'head'
+    scale: string;
+    setType: string;
     direction: number;
     headDirection: number;
     frameNum: number;
@@ -50,7 +43,7 @@ interface RenderParams {
     effect: number;
     expressions: string[];
     handItem: { action: string; id: string } | null;
-    format: string; // 'auto' | 'png' | 'apng'
+    format: string;
     text: string | null;
     textColor: number;
     bubbleColor: number;
@@ -61,7 +54,7 @@ interface RenderResult {
     width: number;
     height: number;
     delays: number[];
-    frames: string[]; // base64 of raw RGBA, length width*height*4
+    frames: string[];
     _diag?: Record<string, unknown>;
 }
 
@@ -93,9 +86,6 @@ const u8ToBase64 = (bytes: Uint8Array): string => {
     return btoa(binary);
 };
 
-// Resolve to a fully-loaded (non-placeholder) avatar image, waiting for the
-// on-demand .nitro downloads that createAvatarImage kicks off. Mirrors the
-// client's LayoutAvatarImageView download-retry contract.
 const createReadyAvatarImage = (figure: string, scale: string, gender: string | null, effectListener: any): Promise<any> =>
     new Promise((resolve, reject) => {
         let settled = false;
@@ -140,8 +130,6 @@ const seekFrame = (avatarImage: any, frame: number): void => {
     if (frame > 0) avatarImage.updateAnimationByFrames(frame);
 };
 
-// Rolling hash over a dense RGBA sample — reliable enough to tell whether two
-// rendered frames are pixel-identical (used for loop detection).
 const frameHash = (pixels: Uint8Array): number => {
     let h = 2166136261;
     const step = Math.max(4, (((pixels.length / 4096) | 0) * 4) || 4);
@@ -162,8 +150,6 @@ const hashString = (h: number, s: string): number => {
     return h >>> 0;
 };
 
-// Room-scale in pixels for the composited coordinate space (LARGE avatars use
-// 64, the half-scale 'sh' assets use 32).
 const scalePx = (scaleStr: string): number => (scaleStr === 'sh' ? 32 : 64);
 
 const AVATAR_SPRITE_ID = 'avatar';
@@ -176,15 +162,10 @@ interface Placement {
     depth: number;
     flipH: boolean;
     blend: string;
-    key: string; // identity for loop-signatures: 'avatar' or scale_member_dir_frame
+    key: string;
     isBody: boolean;
 }
 
-// Replicates AvatarVisualization: the avatar figure is one sprite, and each
-// effect layer is a separate "member" asset (scale_member_direction_frame)
-// placed with its own direction/animation offset and depth. Returns every
-// sprite for a single frame in the shared room coordinate space (origin at the
-// avatar's anchor; values may be negative).
 const collectPlacements = (avatarImage: any, setType: string, frame: number): Placement[] => {
     seekFrame(avatarImage, frame);
 
@@ -261,11 +242,6 @@ const collectPlacements = (avatarImage: any, setType: string, frame: number): Pl
     return placements;
 };
 
-// Signature of a frame's full composited state: every layer's identity, its
-// exact position (so offset-only animation like a bobbing hoverboard is
-// detected), plus the body raster. Used for loop detection — an effect's own
-// animation is ignored by the base frame count, and much of it is expressed as
-// per-frame offsets rather than different sprites.
 const frameSignature = (avatarImage: any, setType: string, frame: number): number => {
     const placements = collectPlacements(avatarImage, setType, frame);
 
@@ -274,19 +250,12 @@ const frameSignature = (avatarImage: any, setType: string, frame: number): numbe
     for (const placement of placements) {
         h = hashString(h, `${placement.key}|${Math.round(placement.x)}|${Math.round(placement.y)}|${placement.flipH ? 1 : 0}`);
 
-        // The body sprite reuses the same texture object across frames but its
-        // pixels change (e.g. walk legs), so fold those in directly.
         if (placement.isBody) h = (h ^ frameHash(TextureUtils.getPixels(placement.texture).pixels as Uint8Array)) >>> 0;
     }
 
     return h >>> 0;
 };
 
-// Find the true animation loop length by sampling a window of frame signatures
-// and returning the smallest period that holds across the WHOLE window. Sampling
-// the full window (rather than trusting the first couple of frames) is essential
-// for effects that hold a pose for several ticks — e.g. a hoverboard that stays
-// put for two frames then bobs would otherwise be mistaken for static.
 const detectLoopLength = (avatarImage: any, setType: string, maxFrames: number): number => {
     const window = Math.max(2, Math.min(maxFrames, 48));
     const signatures: number[] = [];
@@ -306,10 +275,6 @@ const detectLoopLength = (avatarImage: any, setType: string, maxFrames: number):
     return window;
 };
 
-// Pixi's getPixels() returns PREMULTIPLIED alpha (its unpremultiply step is
-// dead-coded), so semi-transparent pixels come back darkened toward black. PNG
-// expects straight alpha, so undo the premultiplication before we hand the
-// pixels off — otherwise effect shadows/glows render as black smudges.
 const unpremultiplyAlpha = (pixels: Uint8Array): Uint8Array => {
     for (let i = 0; i < pixels.length; i += 4) {
         const a = pixels[i + 3];
@@ -332,8 +297,6 @@ interface Bubble {
     height: number;
 }
 
-// Draw a Habbo-style speech balloon (rounded rect + downward tail) with the
-// text inside, into its own texture. Rendered once and overlaid on every frame.
 const buildTextBubble = (text: string, textColor: number, bubbleColor: number): Bubble | null => {
     const padX = 9;
     const padY = 6;
@@ -360,7 +323,7 @@ const buildTextBubble = (text: string, textColor: number, bubbleColor: number): 
     const textH = Math.ceil(label.height);
     const bodyW = textW + padX * 2;
     const bodyH = textH + padY * 2;
-    const totalW = bodyW + 2; // room for the 1px stroke
+    const totalW = bodyW + 2;
     const totalH = bodyH + tailH + 2;
     const cx = bodyW / 2;
 
@@ -371,7 +334,6 @@ const buildTextBubble = (text: string, textColor: number, bubbleColor: number): 
         .fill({ color: bubbleColor })
         .stroke({ color: border, width: 1, alignment: 0.5 });
 
-    // Downward tail, centred under the body.
     graphics
         .moveTo(cx - tailW / 2, bodyH)
         .lineTo(cx + tailW / 2, bodyH)
@@ -380,7 +342,6 @@ const buildTextBubble = (text: string, textColor: number, bubbleColor: number): 
         .fill({ color: bubbleColor })
         .stroke({ color: border, width: 1 });
 
-    // Cover the seam where the tail meets the body so no border line shows through.
     graphics.rect(cx - tailW / 2 + 1, bodyH - 1, tailW - 2, 2).fill({ color: bubbleColor });
 
     label.x = 1 + padX;
@@ -399,12 +360,9 @@ const buildTextBubble = (text: string, textColor: number, bubbleColor: number): 
     return bubble;
 };
 
-// Composite one frame's placements (avatar + effect layers, back-to-front) into
-// a texture of the given region and read back the pixels.
 const compositeFrame = (placements: Placement[], rx: number, ry: number, rw: number, rh: number): Frame => {
     const container = new Container();
 
-    // Higher depth = further back → draw first.
     placements.sort((a, b) => b.depth - a.depth);
 
     for (const placement of placements) {
@@ -436,17 +394,12 @@ const compositeFrame = (placements: Placement[], rx: number, ry: number, rw: num
     return frame;
 };
 
-// Render every frame by compositing the avatar figure with its effect layers,
-// into a texture sized to the union of all frames' bounds (so effect sprites
-// that extend past the avatar box are included and frames stay the same size).
 const renderFrames = (avatarImage: any, setType: string, absoluteFrames: number[], bubble: Bubble | null = null): Frame[] => {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
-    // Pass 1: union bounds. (Effect textures are stable; the body texture is
-    // pooled, so we re-collect per frame in pass 2 rather than holding it.)
     for (const frame of absoluteFrames) {
         for (const placement of collectPlacements(avatarImage, setType, frame)) {
             const w = placement.texture.width;
@@ -463,8 +416,6 @@ const renderFrames = (avatarImage: any, setType: string, absoluteFrames: number[
 
     if (!Number.isFinite(minX)) return [{ pixels: new Uint8Array(4), width: 1, height: 1 }];
 
-    // Position the speech bubble centred above the avatar, and grow the canvas to
-    // fit it. It's a static overlay drawn on top of every frame.
     let bubblePlacement: Placement | null = null;
 
     if (bubble) {
@@ -485,7 +436,6 @@ const renderFrames = (avatarImage: any, setType: string, absoluteFrames: number[
     const rw = Math.max(1, Math.ceil(maxX) - rx);
     const rh = Math.max(1, Math.ceil(maxY) - ry);
 
-    // Pass 2: composite each frame (bubble drawn last/on top via its low depth).
     return absoluteFrames.map((frame) => {
         const placements = collectPlacements(avatarImage, setType, frame);
 
@@ -495,8 +445,6 @@ const renderFrames = (avatarImage: any, setType: string, absoluteFrames: number[
     });
 };
 
-// Union of opaque pixels across all frames (used to crop head-only output to
-// the head, while keeping every frame the same size for a valid APNG).
 const unionOpaqueBox = (frames: Frame[]): { x: number; y: number; w: number; h: number } | null => {
     let minX = Infinity;
     let minY = Infinity;
@@ -571,12 +519,6 @@ const renderAvatar = async (params: RenderParams): Promise<RenderResult> => {
 
         avatarImage.endActionAppends();
 
-        // Effect libraries download during endActionAppends. The first
-        // endActionAppends() computed the frame count WITHOUT the effect (its
-        // library wasn't loaded yet), so once the effect arrives we re-run
-        // endActionAppends() to re-sort and recompute _animationFrameCount with
-        // the effect's own (usually longer) animation included. Without this the
-        // effect gets sampled over too few frames and looks like a flashing dot.
         if (params.effect > 0) {
             await Promise.race([effectReady, wait(EFFECT_TIMEOUT())]);
             avatarImage.endActionAppends();
@@ -585,18 +527,13 @@ const renderAvatar = async (params: RenderParams): Promise<RenderResult> => {
         const baseFrameCount = Math.max(1, (avatarImage as any)._animationFrameCount | 0);
         const setType = params.setType === 'head' ? AvatarSetType.HEAD : AvatarSetType.FULL;
 
-        // An effect animates even on a still posture, so treat it as animated too.
         const animates = Boolean(avatarImage.isAnimating && avatarImage.isAnimating()) || baseFrameCount > 1 || params.effect > 0;
 
         let wantAnimation: boolean;
 
         if (params.format === 'png') wantAnimation = false;
-        else wantAnimation = animates; // 'apng' forces it; 'auto' follows the animation
+        else wantAnimation = animates;
 
-        // Frame count. Base actions (walk/wave/dance) report their own count
-        // reliably via _animationFrameCount, so use it directly and cheaply. Only
-        // effects need the windowed loop detection (their motion isn't reflected
-        // in _animationFrameCount and is often an offset-only hold-and-bob).
         let loopLength;
 
         if (!wantAnimation) loopLength = 1;
@@ -617,7 +554,6 @@ const renderAvatar = async (params: RenderParams): Promise<RenderResult> => {
             try {
                 bubble.texture.destroy(true);
             } catch {
-                // best effort
             }
         }
 
@@ -656,8 +592,6 @@ const renderAvatar = async (params: RenderParams): Promise<RenderResult> => {
                 spriteCount = 'err';
             }
 
-            // Does the effect's animation actually exist in the structure, and
-            // does it carry sprite layers? Probe a few likely key spellings.
             try {
                 const structure = (avatarImage as any)._structure;
 
@@ -670,9 +604,6 @@ const renderAvatar = async (params: RenderParams): Promise<RenderResult> => {
                 animLookups.error = (error as Error)?.message;
             }
 
-            // Per effect layer on frame 0: the resolved asset, its ink/blend and
-            // its actual alpha range (opaque black vs a soft shadow), so a black
-            // smudge can be pinned to a specific sprite/blend.
             let effectAssetsResolved = 0;
             const missingSamples: string[] = [];
             const layers: unknown[] = [];
@@ -719,7 +650,6 @@ const renderAvatar = async (params: RenderParams): Promise<RenderResult> => {
                     layers.push({ id: spriteData.id, member: spriteData.member, ink: spriteData.ink, hasDirections: spriteData.hasDirections, asset: name, resolved: Boolean(asset), alpha: alphaRange });
                 }
             } catch {
-                // ignore
             }
 
             diag = {
@@ -750,17 +680,17 @@ const renderAvatar = async (params: RenderParams): Promise<RenderResult> => {
         try {
             avatarImage.dispose();
         } catch {
-            // best effort
         }
     }
 };
 
-const boot = async (): Promise<void> => {
-    // The renderer only needs a prepared pixi renderer; config/gamedata come next.
+export const initRenderer = async (): Promise<void> => {
     await PrepareRenderer({
         width: 64,
         height: 128,
         preference: 'webgl',
+        skipExtensionImports: true,
+        preferWebGLVersion: 1,
         backgroundAlpha: 0,
         antialias: false,
         autoDensity: false,
@@ -771,16 +701,11 @@ const boot = async (): Promise<void> => {
         clearBeforeRender: true
     } as any);
 
-    // Network-free infra self-test: render a red square and read it back. Proves
-    // pixi + SwiftShader WebGL + pixel extraction work in this Chromium without
-    // needing any gamedata/assets. Used by scripts/smoke-webgl.mjs.
     if (window.__IMAGING_SELFTEST__) {
         const graphics = new Graphics().rect(0, 0, 8, 8).fill(0xff0000);
         const texture = TextureUtils.createAndWriteRenderTexture(8, 8, graphics);
         const data = TextureUtils.getPixels(texture);
 
-        // Also render a text bubble and count opaque + non-background pixels, to
-        // confirm text (fonts) actually rasterizes in this Chromium.
         let textPixels = 0;
 
         try {
@@ -790,7 +715,6 @@ const boot = async (): Promise<void> => {
                 const bp = TextureUtils.getPixels(bubble.texture).pixels as Uint8Array;
 
                 for (let i = 0; i < bp.length; i += 4) {
-                    // count dark (text) pixels that aren't the white bubble body
                     if (bp[i + 3] > 128 && bp[i] < 128) textPixels++;
                 }
 
@@ -819,13 +743,6 @@ const boot = async (): Promise<void> => {
     GetTicker().maxFPS = GetConfiguration().getValue<number>('system.fps.max', 24);
 
     await GetAvatarRenderManager().init();
-
-    window.__nitroRenderAvatar = renderAvatar;
-    window.__NITRO_READY__ = true;
 };
 
-boot().catch((error) => {
-    window.__NITRO_ERROR__ = error?.message ?? String(error);
-    // eslint-disable-next-line no-console
-    console.error('[avatar-imaging harness] boot failed:', error);
-});
+export { renderAvatar };
