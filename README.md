@@ -68,6 +68,45 @@ cp .env.example .env              # point NITRO_GAMEDATA_URL / NITRO_ASSET_URL a
 npm run build                     # bundles harness/boot-node.ts -> dist-node/boot-node.mjs
 ```
 
+## Docker (recommended for deployment)
+
+Self-contained: the image compiles the native modules, fetches the Nitro renderer
+from git and bundles it, then runs in a slim image with Xvfb + fonts baked in — no
+host toolchain, no monorepo, no per-machine native build. This folder can live
+**anywhere** on its own; the build context is the folder itself.
+
+```
+cp .env.example .env              # set NITRO_GAMEDATA_URL / NITRO_ASSET_URL etc. first
+docker compose up -d --build
+```
+
+Then:
+
+```
+curl http://localhost:8082/health
+curl 'http://localhost:8082/avatarimage?figure=hd-180-1.ch-255-66.lg-280-110.sh-305-62&effect=14&img_format=apng' -o out.png
+```
+
+Notes:
+- **`.env` is required** — compose reads it via `env_file`. Copy `.env.example`
+  first. It's gitignored, so hotel URLs / API keys stay out of the image and repo.
+- The service listens on `AVATAR_IMAGING_PORT` (default 8082), published to the
+  same host port.
+- **Renderer source.** The build clones the renderer from its public repo
+  `github.com/duckietm/Nitro_Render_V3` (branch `main`) and bundles it — you do NOT
+  need the renderer checked out next to this folder. To build against a different
+  fork/branch, set `RENDERER_REPO` / `RENDERER_REF`, e.g.
+  `RENDERER_REF=Dev docker compose up -d --build`, or add them to `.env`.
+- **Reaching your hotel gamedata:** the container uses the default bridge network,
+  which can normally reach LAN hosts like `http://192.168.0.8`. If your gamedata
+  host is only reachable from the host's own network namespace, add
+  `network_mode: host` to the service (the `ports:` mapping is then ignored).
+- **First build is slow** (clones + installs the renderer's deps, compiles
+  `canvas`/`gl`); it's layer-cached afterwards. Rebuild with
+  `docker compose up -d --build`.
+- `docker compose logs -f` for output; `docker compose ps` shows `healthy` once
+  the renderer has booted (the healthcheck polls `/health`).
+
 ## Windows
 
 Windows works for development/testing (production is Linux). headless-gl uses the

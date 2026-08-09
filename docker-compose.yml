@@ -1,0 +1,22 @@
+services:
+  avatar-imaging-pixinode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RENDERER_REPO: ${RENDERER_REPO:-https://github.com/duckietm/Nitro_Render_V3.git}
+        RENDERER_REF: ${RENDERER_REF:-main}
+    image: avatar-imaging-pixinode:latest
+    container_name: avatar-imaging-pixinode
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    ports:
+      - "${AVATAR_IMAGING_PORT:-8082}:${AVATAR_IMAGING_PORT:-8082}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.AVATAR_IMAGING_PORT||8082)+'/health').then(r=>r.json()).then(j=>process.exit(j.ready?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s

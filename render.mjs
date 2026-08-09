@@ -1,3 +1,4 @@
+import './src/browser-globals.mjs';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';

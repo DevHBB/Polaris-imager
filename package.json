@@ -11,15 +11,15 @@
         "start": "node src/server.mjs",
         "serve": "npm run build && node src/server.mjs"
     },
-    "comment": "The renderer is consumed via `yarn link \"@nitrots/nitro-renderer\"` and Vite aliases (see vite.node.config.mjs), the same as the browser service and Nitro-UI — so pixi.js is NOT a registry dependency here. @pixi/node@8 declares canvas/gl as PEER deps (not auto-installed), so they are listed explicitly below; both are native addons and need the system build libs in the README. cross-fetch and @xmldom/xmldom are shimmed at build time, so they are not installed.",
+    "comment": "The renderer is consumed via Vite aliases (see vite.node.config.mjs) and @pixi/node is inlined into dist-node/boot-node.mjs at build time, so @pixi/node and pixi.js are BUILD-only (devDependencies). The runtime bundle imports only the native addons gl + canvas (kept external), which stay in dependencies with upng-js (APNG) and express (HTTP). This keeps the Docker runtime image to the runtime deps only.",
     "dependencies": {
-        "@pixi/node": "^8.0.0",
         "canvas": "^3.2.0",
         "express": "^4.21.2",
         "gl": "^8.1.6",
         "upng-js": "^2.1.0"
     },
     "devDependencies": {
+        "@pixi/node": "^8.0.0",
         "@xmldom/xmldom": "^0.8.11",
         "cross-fetch": "^4.1.0",
         "pixi.js": "^8.19.0",

@@ -3,7 +3,9 @@ import { DOMAdapter, isWebGLSupported } from 'pixi.js';
 import { loadImage, registerFont } from 'canvas';
 import { existsSync } from 'node:fs';
 
-(globalThis as any).__PIXI_NODE__ = PixiNode;
+const g = globalThis as any;
+
+g.__PIXI_NODE__ = PixiNode;
 
 const nodeAdapter = (PixiNode as any).DOMAdapter?.get?.();
 
@@ -19,26 +21,6 @@ try {
 try {
     isWebGLSupported(false);
 } catch {
-}
-
-const g = globalThis as any;
-
-if (!g.window) g.window = g;
-if (!g.self) g.self = g;
-if (!g.navigator) g.navigator = { userAgent: 'nitro-imaging-node', language: 'en', platform: 'node' };
-if (!g.location) {
-    g.location = { href: 'http://localhost/', origin: 'http://localhost', protocol: 'http:', host: 'localhost', hostname: 'localhost', pathname: '/', search: '' };
-}
-if (!g.document) {
-    g.document = {
-        createElement: () => ({ style: {}, setAttribute() {}, getContext: () => null, addEventListener() {}, removeEventListener() {} }),
-        addEventListener() {},
-        removeEventListener() {},
-        getElementsByTagName: () => [],
-        querySelector: () => null,
-        documentElement: { style: {} },
-        body: { style: {}, appendChild() {}, removeChild() {} }
-    };
 }
 
 try {
