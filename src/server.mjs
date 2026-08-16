@@ -1,18 +1,21 @@
 import express from 'express';
 import { createHash } from 'crypto';
+import { existsSync, readFileSync } from 'fs';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { CONFIG, buildRendererConfig } from './config.mjs';
 import { parseAvatarParams, ParamError } from './params.mjs';
-import { encodeFrames } from './apng.mjs';
-import { RendererPool } from './renderer.mjs';
+import { encodeFrames, flattenFrames, upscaleNearest } from './apng.mjs';
+import { RendererPool, preflightGl } from './renderer.mjs';
 import { createApiKeyGuard, createCors, createRateLimiter, makeClientIp, securityHeaders } from './security.mjs';
 import { createAccessLogger } from './logger.mjs';
-// [EN] Added: the browser-based avatar generator (GET /Generate).
-// [FR] Ajout : le générateur d'avatars pour navigateur (GET /Generate).
+
 import { createGenerateRouter } from './generate-route.mjs';
-// [EN] Added: optional read-only hotel database, used by the panel only.
-// [FR] Ajout : base de données de l'hôtel optionnelle en lecture seule, utilisée
-//      uniquement par le panel.
+
 import { checkDatabase, closeDatabase } from './db.mjs';
+import { decodeScene, renderScene, SceneError } from './scene.mjs';
+import { composeWithBubble, getBubble } from './chat-bubbles.mjs';
+import { renderLandingPage } from './landing-page.mjs';
 
 class ResponseCache {
     #map = new Map();
@@ -104,17 +107,6 @@ if (CONFIG.accessLog) {
     });
 }
 
-// ---------------------------------------------------------------------------
-// [EN] Added: mount the generator UI. It gets its own rate-limit bucket because
-//      one preview refresh also loads 16 direction thumbnails from
-//      /avatarimage — sharing the image limiter would exhaust it in seconds.
-//      Express routing is case-insensitive, so /generate hits it as well.
-// [FR] Ajout : montage de l'interface du générateur. Elle a son propre compteur
-//      de limitation car un rafraîchissement d'aperçu charge aussi 16 vignettes
-//      de direction depuis /avatarimage — partager le compteur des images
-//      l'épuiserait en quelques secondes. Le routage Express étant insensible à
-//      la casse, /generate y accède également.
-// ---------------------------------------------------------------------------
 if (CONFIG.generate.enabled) {
     const generateLimiter = createRateLimiter({
         windowMs: CONFIG.rateLimitWindowMs,
@@ -131,38 +123,76 @@ app.get('/health', (req, res) => {
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
+const apiReference = () => [
+    'Nitro avatar-imaging service (@pixi/node, headless — no browser)',
+    '',
+    'GET /avatarimage',
+    '  figure          figure string (required)',
+    '  action          comma-separated, e.g. wlk,wav,drk=1',
+    '  gesture         std | agr | sad | sml | srp   (default std)',
+    '  direction       0-7                           (default 2)',
+    '  head_direction  0-7                           (default 2)',
+    '  headonly        0 | 1                          (default 0)',
+    '  dance           0-4                            (default 0)',
+    '  effect          effect id                      (default 0)',
+    '  size            s | n | l                      (default n)',
+    '  frame_num       still-frame index              (default 0)',
+    '  img_format      png | apng | auto              (default auto)',
+    '  text            speech-bubble text above the avatar',
+    '  text_color      bubble text colour, hex        (default 000000)',
+    '  bubble_color    bubble background colour, hex  (default ffffff)',
+    '  bg_color        flatten onto this colour, hex  (default transparent)',
+    '  bubble          chat bubble style id, with text (default: engine bubble)',
+    '',
+    'Example:',
+    '  /avatarimage?figure=hd-180-1.ch-255-66.lg-280-110.sh-305-62&action=wlk,wav&direction=2&size=l',
+    '  /avatarimage?figure=hd-180-1.ch-255-66&text=Hello!&bubble_color=2266cc&text_color=ffffff',
+    '',
+    ...(CONFIG.generate.enabled
+        ? [`GET ${ CONFIG.generate.path }`, '  Browser UI to build a figure and copy/download the image.', '']
+        : []),
+    ...(CONFIG.scene.enabled
+        ? [
+            `GET ${ CONFIG.scene.path }?s=<encoded scene>`,
+            '  Renders several avatars, images and text into one PNG.',
+            `  Built visually in ${ CONFIG.generate.path }/scene`,
+            ''
+        ]
+        : [])
+].join('\n');
+
+const MASCOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'franck.png');
+
+app.get('/mascot.png', (req, res) => {
+    if (!existsSync(MASCOT)) return res.status(404).end();
+
+    res.set('Cache-Control', 'public, max-age=86400');
+
+    return res.type('image/png').send(readFileSync(MASCOT));
+});
+
 app.get('/', (req, res) => {
-    res.type('text/plain').send(
-        [
-            'Nitro avatar-imaging service (@pixi/node, headless — no browser)',
-            '',
-            'GET /avatarimage',
-            '  figure          figure string (required)',
-            '  action          comma-separated, e.g. wlk,wav,drk=1',
-            '  gesture         std | agr | sad | sml | srp   (default std)',
-            '  direction       0-7                           (default 2)',
-            '  head_direction  0-7                           (default 2)',
-            '  headonly        0 | 1                          (default 0)',
-            '  dance           0-4                            (default 0)',
-            '  effect          effect id                      (default 0)',
-            '  size            s | n | l                      (default n)',
-            '  frame_num       still-frame index              (default 0)',
-            '  img_format      png | apng | auto              (default auto)',
-            '  text            speech-bubble text above the avatar',
-            '  text_color      bubble text colour, hex        (default 000000)',
-            '  bubble_color    bubble background colour, hex  (default ffffff)',
-            '',
-            'Example:',
-            '  /avatarimage?figure=hd-180-1.ch-255-66.lg-280-110.sh-305-62&action=wlk,wav&direction=2&size=l',
-            '  /avatarimage?figure=hd-180-1.ch-255-66&text=Hello!&bubble_color=2266cc&text_color=ffffff',
-            '',
-            // [EN] Added: point people at the visual builder.
-            // [FR] Ajout : indique le constructeur visuel.
-            ...(CONFIG.generate.enabled
-                ? [`GET ${ CONFIG.generate.path }`, '  Browser UI to build a figure and copy/download the image.', '']
-                : [])
-        ].join('\n')
-    );
+    // Browsers ask for text/html explicitly; curl, monitoring and scripts send
+    // */* and keep the plain-text listing they have always had.
+    if (!String(req.headers.accept || '').includes('text/html')) {
+        return res.type('text/plain').send(apiReference());
+    }
+
+    const html = renderLandingPage({
+        title: CONFIG.generate.title,
+        hotelUrl: CONFIG.hotel.url,
+        hotelName: CONFIG.hotel.name,
+        mascot: existsSync(MASCOT) ? '/mascot.png' : '',
+        generatePath: CONFIG.generate.enabled && !CONFIG.generate.token ? CONFIG.generate.path : '',
+        scenePath: CONFIG.generate.enabled && CONFIG.scene.enabled && !CONFIG.generate.token
+            ? `${ CONFIG.generate.path }/scene`
+            : '',
+        apiText: apiReference()
+    });
+
+    res.set('Cache-Control', 'no-store');
+
+    return res.type('text/html; charset=utf-8').send(html);
 });
 
 const sendImage = (res, buffer, animated, cacheState) => {
@@ -208,21 +238,63 @@ app.get('/avatarimage', cors, rateLimiter, apiKeyGuard, async (req, res) => {
 
     if (!renderer.ready) return res.status(503).type('text/plain').send('Renderer still starting, try again shortly.');
 
+    // A sprite bubble is composited here instead of being drawn by the renderer,
+    // so the avatar itself is rendered without any speech bubble.
+    let bubble = null;
+
+    if (descriptor.bubble && descriptor.text && CONFIG.bubbles.enabled) {
+        try {
+            bubble = await getBubble(descriptor.bubble);
+        } catch (error) {
+            console.warn('[pixinode] bubble catalog failed:', error?.message || error);
+        }
+    }
+
     try {
-        const rendered = await renderer.render(descriptor);
+        const rendered = await renderer.render(bubble ? { ...descriptor, text: null } : descriptor);
 
         if (rendered?._diag) console.log('[pixinode] effect diag:', JSON.stringify(rendered._diag));
 
         if (!rendered || !rendered.frames?.length) throw new Error('renderer produced no frames');
 
-        const frames = rendered.frames.map((frame) => Buffer.from(frame, 'base64'));
+        let frames = rendered.frames.map((frame) => Buffer.from(frame, 'base64'));
+        let width = rendered.width;
+        let height = rendered.height;
+
+        let postScale = descriptor.postScale;
+
+        // The avatar is enlarged first, then the bubble is composited at that same
+        // factor: its text is drawn at the final size instead of being magnified
+        // pixel by pixel afterwards.
+        if (bubble) {
+            if (postScale !== 1) {
+                frames = frames.map((frame) => upscaleNearest(frame, width, height, postScale));
+                width *= postScale;
+                height *= postScale;
+            }
+
+            const composed = composeWithBubble(
+                { frames, width, height },
+                bubble,
+                descriptor.text,
+                `#${ descriptor.textColor.toString(16).padStart(6, '0') }`,
+                postScale
+            );
+
+            frames = composed.frames;
+            width = composed.width;
+            height = composed.height;
+            postScale = 1;
+        }
+
+        if (descriptor.background !== null) frames = flattenFrames(frames, descriptor.background);
 
         const buffer = encodeFrames({
             frames,
-            width: rendered.width,
-            height: rendered.height,
+            width,
+            height,
             delays: rendered.delays,
-            postScale: descriptor.postScale
+            postScale
         });
 
         cache.set(cacheKey, { buffer, animated: rendered.animated });
@@ -240,6 +312,58 @@ app.get('/avatarimage', cors, rateLimiter, apiKeyGuard, async (req, res) => {
         return res.status(500).type('text/plain').send('Render failed.');
     }
 });
+
+if (CONFIG.scene.enabled) {
+    app.get(CONFIG.scene.path, cors, rateLimiter, apiKeyGuard, async (req, res) => {
+        let scene;
+
+        try {
+            scene = decodeScene(Array.isArray(req.query.s) ? req.query.s[0] : req.query.s);
+        } catch (error) {
+            const message = error instanceof SceneError ? error.message : 'Bad scene.';
+
+            return res.status(400).type('text/plain').send(message);
+        }
+
+        const cacheKey = `scene:${ JSON.stringify(scene) }`;
+        const etag = `"${ createHash('sha1').update(`${ cacheKey }|${ CONFIG.assetVersion }`).digest('base64') }"`;
+
+        res.set('ETag', etag);
+        res.set('Cache-Control', `public, max-age=${ Math.floor(CONFIG.cacheTtlMs / 1000) }`);
+
+        if (req.headers['if-none-match'] === etag) {
+            res.set('X-Cache', 'REVALIDATED');
+
+            return res.status(304).end();
+        }
+
+        const cached = cache.get(cacheKey);
+
+        if (cached) return sendImage(res, cached.buffer, cached.animated, 'HIT');
+
+        if (!renderer.ready) return res.status(503).type('text/plain').send('Renderer still starting, try again shortly.');
+
+        try {
+            const { buffer, animated } = await renderScene(scene, renderer);
+
+            cache.set(cacheKey, { buffer, animated });
+
+            return sendImage(res, buffer, animated, 'MISS');
+        } catch (error) {
+            if (error instanceof SceneError) return res.status(400).type('text/plain').send(error.message);
+
+            if (error?.code === 'OVERLOADED') {
+                res.set('Retry-After', '2');
+
+                return res.status(503).type('text/plain').send('Server busy, try again shortly.');
+            }
+
+            console.error('[pixinode] scene render failed:', error?.message || error);
+
+            return res.status(500).type('text/plain').send('Scene render failed.');
+        }
+    });
+}
 
 const preflightGamedata = async () => {
     const cfg = buildRendererConfig();
@@ -323,15 +447,6 @@ const start = async () => {
 
     await preflightGamedata();
 
-    // [EN] Added: check the panel's database once at boot so a wrong password or
-    //      a renamed column is reported here, not on the first search.
-    // [FR] Ajout : vérifie la base du panel une fois au démarrage pour qu'un
-    //      mauvais mot de passe ou une colonne renommée soit signalé ici, et non
-    //      à la première recherche.
-    // [EN] Credentials present but the switch is off: say so, it is almost
-    //      always a forgotten AVATAR_IMAGING_DB_ENABLED=true.
-    // [FR] Identifiants présents mais interrupteur éteint : on le signale, c'est
-    //      presque toujours un AVATAR_IMAGING_DB_ENABLED=true oublié.
     if (CONFIG.db.configuredButOff) {
         console.log('[pixinode] database OFF (AVATAR_IMAGING_DB_ENABLED is not true) — panel search disabled.');
     }
@@ -350,14 +465,24 @@ const start = async () => {
         }
     }
 
+    if (!await preflightGl()) {
+        process.exit(1);
+    }
+
     const server = app.listen(CONFIG.port, CONFIG.host, () => {
+
+        server.headersTimeout = 30_000;
+        server.requestTimeout = 60_000;
         console.log(`[pixinode] listening on http://${ CONFIG.host }:${ CONFIG.port }`);
 
-        // [EN] Added: tell the operator where the generator lives, and warn when
-        //      the image rate limit is too low for it (one refresh ≈ 17 images).
-        // [FR] Ajout : indique à l'exploitant où se trouve le générateur, et
-        //      prévient si la limite de requêtes d'images est trop basse pour lui
-        //      (un rafraîchissement ≈ 17 images).
+        if (CONFIG.scene.enabled) {
+            console.log(`[pixinode] scene image hosts: ${ CONFIG.scene.imageHosts.length ? CONFIG.scene.imageHosts.join(', ') : '(none)' }`);
+
+            if (CONFIG.scene.imageHosts.includes('*')) {
+                console.warn('[pixinode] AVATAR_IMAGING_SCENE_IMAGE_HOSTS=* lets the server fetch ANY url. Only do this on a trusted network.');
+            }
+        }
+
         if (CONFIG.generate.enabled) {
             const base = CONFIG.generate.publicUrl || `http://${ CONFIG.host }:${ CONFIG.port }`;
 
@@ -368,11 +493,6 @@ const start = async () => {
                         CONFIG.generate.authMode === 'hotel' ? `, rank >= ${ CONFIG.generate.authMinRank }` : '' })`
                     : (CONFIG.generate.token ? '?token=' : 'PUBLIC') }`);
 
-            // [EN] Loud warning: a login gate that cannot work leaves the panel
-            //      closed (503), which is safe but needs explaining.
-            // [FR] Avertissement appuyé : un portail qui ne peut pas fonctionner
-            //      laisse le panel fermé (503), ce qui est sûr mais mérite
-            //      explication.
             if (CONFIG.generate.authEnabled && CONFIG.generate.authMode === 'hotel' && !CONFIG.db.enabled) {
                 console.warn(
                     '[pixinode] PANEL CLOSED: AUTH_MODE=hotel needs AVATAR_IMAGING_DB_ENABLED=true.\n' +
@@ -414,7 +534,6 @@ const start = async () => {
         } catch {
         }
 
-        // [EN] Added: release the database pool too. [FR] Ajout : libère aussi le pool de base.
         await closeDatabase();
 
         process.exit(0);

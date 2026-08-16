@@ -212,6 +212,27 @@ requests never reach the renderer. All `AVATAR_IMAGING_*` knobs (port, cache,
 rate limit, API keys, CORS, proxy/real-IP, access log) are in `.env.example` and
 match the browser service's names.
 
+### Landing page — `GET /`
+
+A browser landing on the service root used to get the raw API listing. It now
+gets a plain white page with the mascot explaining that this host renders avatars
+and nothing else, a button back to the hotel, links to the panel and the scene
+composer when they are enabled and not token-protected, and the API reference in
+a dialog. Five languages, same picker as the rest.
+
+The switch is the `Accept` header: browsers ask for `text/html` and get the page,
+while curl, monitoring and scripts send `*/*` and keep the plain-text listing
+byte for byte.
+
+```env
+AVATAR_IMAGING_HOTEL_URL=https://your-hotel.example
+AVATAR_IMAGING_HOTEL_NAME=Your Hotel
+```
+
+Empty URL hides the button. The mascot is `assets/franck.png`, served from
+`GET /mascot.png` — drop another PNG in its place to change it, or delete it and
+the page renders without one.
+
 ### Browser panel — `GET /Generate`
 
 A self-contained page to compose a figure and copy or download the resulting

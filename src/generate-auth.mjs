@@ -1,41 +1,9 @@
-// ---------------------------------------------------------------------------
-// [EN] generate-auth.mjs — optional login gate for the generator panel, in two
-//      modes (AVATAR_IMAGING_GENERATE_AUTH_MODE):
-//
-//        'password' — one shared account defined in .env. No database involved,
-//                     no player account exposed. Works even if MySQL is down.
-//        'hotel'    — sign in with a real hotel account, checked against the
-//                     users table, with a minimum rank. Requires the database.
-//
-//      Off by default: the panel is then public, exactly like the /avatarimage
-//      API. The session is a signed cookie — Node's own HMAC, parsed by hand,
-//      so nothing extra to install for it.
-//
-// [FR] generate-auth.mjs — portail de connexion optionnel du panel du
-//      générateur, en deux modes (AVATAR_IMAGING_GENERATE_AUTH_MODE) :
-//
-//        'password' — un compte partagé défini dans le .env. Aucune base
-//                     impliquée, aucun compte joueur exposé. Fonctionne même si
-//                     MySQL est à l'arrêt.
-//        'hotel'    — connexion avec un vrai compte de l'hôtel, vérifié dans la
-//                     table des utilisateurs, avec un rang minimum. Nécessite la
-//                     base de données.
-//
-//      Désactivé par défaut : le panel est alors public, exactement comme l'API
-//      /avatarimage. La session est un cookie signé — le HMAC intégré de Node,
-//      analysé à la main : rien de plus à installer pour ça.
-// ---------------------------------------------------------------------------
-
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { findAccountForLogin } from './db.mjs';
 
 const COOKIE = 'avstudio';
 
-// [EN] Constant-time compare, so a wrong password cannot be guessed by measuring
-//      how long the answer takes.
-// [FR] Comparaison à temps constant : un mot de passe erroné ne peut donc pas
-//      être deviné en mesurant le temps de réponse.
-const safeEqual = (a, b) => {
+export const safeEqual = (a, b) => {
     const bufA = Buffer.from(String(a));
     const bufB = Buffer.from(String(b));
 
@@ -46,8 +14,6 @@ const safeEqual = (a, b) => {
 
 const sign = (value, secret) => createHmac('sha256', secret).update(value).digest('base64url');
 
-// [EN] Minimal cookie header parser (no cookie-parser dependency).
-// [FR] Analyseur minimal d'en-tête Cookie (sans dépendance cookie-parser).
 const readCookie = (req, name) => {
     const header = req.headers.cookie;
 
@@ -64,15 +30,6 @@ const readCookie = (req, name) => {
     return null;
 };
 
-// ---------------------------------------------------------------------------
-// [EN] Password hashes found in the wild on Habbo emulators. Modern CMSes store
-//      bcrypt ($2y$/$2a$/$2b$); older ones store a bare MD5/SHA hex digest. The
-//      format is detected from the stored value itself, so nothing to configure.
-// [FR] Hachages de mots de passe rencontrés sur les émulateurs Habbo. Les CMS
-//      modernes stockent du bcrypt ($2y$/$2a$/$2b$) ; les plus anciens un simple
-//      condensé hexadécimal MD5/SHA. Le format est détecté depuis la valeur
-//      stockée elle-même : rien à configurer.
-// ---------------------------------------------------------------------------
 const HEX_ALGOS = { 32: 'md5', 40: 'sha1', 64: 'sha256', 128: 'sha512' };
 
 export const verifyPasswordHash = async (plain, stored) => {
@@ -82,13 +39,7 @@ export const verifyPasswordHash = async (plain, stored) => {
 
     if (/^\$2[aby]\$/.test(hash)) {
         try {
-            // [EN] bcryptjs is pure JavaScript — no compiler, no native module.
-            //      $2y$ is PHP's label for the very same algorithm as $2a$, and
-            //      is normalised here so the comparison succeeds.
-            // [FR] bcryptjs est en JavaScript pur — pas de compilateur, pas de
-            //      module natif. $2y$ est l'étiquette PHP du même algorithme que
-            //      $2a$ ; elle est normalisée ici pour que la comparaison
-            //      aboutisse.
+
             const bcrypt = (await import('bcryptjs')).default;
 
             return await bcrypt.compare(plain, hash.replace(/^\$2y\$/, '$2a$'));
@@ -105,30 +56,15 @@ export const verifyPasswordHash = async (plain, stored) => {
         return safeEqual(createHash(algo).update(plain).digest('hex'), hash.toLowerCase());
     }
 
-    // [EN] Unknown format: refuse rather than guess. [FR] Format inconnu : on
-    //      refuse plutôt que de deviner.
     console.warn('[pixinode] unsupported password hash format in the users table.');
 
     return false;
 };
 
-/**
- * [EN] Build the auth helpers for the generator router.
- * [FR] Construit les utilitaires d'authentification du routeur du générateur.
- *
- * @param {object} gen [EN] CONFIG.generate  [FR] CONFIG.generate
- * @param {object} db  [EN] CONFIG.db        [FR] CONFIG.db
- */
 export const createAuth = (gen, db) => {
-    // [EN] The signing secret. Without one, a random secret is generated at boot:
-    //      that is safe, but logs everyone out on every restart.
-    // [FR] Le secret de signature. Sans lui, un secret aléatoire est généré au
-    //      démarrage : c'est sûr, mais tout le monde est déconnecté à chaque
-    //      redémarrage.
+
     const secret = gen.authSecret || randomBytes(32).toString('hex');
 
-    // [EN] Per-IP failure counter for the login form.
-    // [FR] Compteur d'échecs par IP pour le formulaire de connexion.
     const failures = new Map();
 
     const issue = (res, username, secure) => {
@@ -146,8 +82,6 @@ export const createAuth = (gen, db) => {
 
     const clear = (res) => res.clearCookie(COOKIE, { path: gen.path });
 
-    // [EN] Returns the logged-in username, or null.
-    // [FR] Renvoie le pseudo connecté, ou null.
     const session = (req) => {
         const raw = readCookie(req, COOKIE);
 
@@ -193,8 +127,6 @@ export const createAuth = (gen, db) => {
         entry.until = Date.now() + gen.authLockMs;
         failures.set(ip, entry);
 
-        // [EN] Cheap pruning so the map cannot grow without bound.
-        // [FR] Purge peu coûteuse pour que la table ne grossisse pas sans fin.
         if (failures.size > 5000) {
             const now = Date.now();
 
@@ -204,10 +136,6 @@ export const createAuth = (gen, db) => {
         }
     };
 
-    /**
-     * [EN] Check submitted credentials. Returns { ok, username, error }.
-     * [FR] Vérifie les identifiants soumis. Renvoie { ok, username, error }.
-     */
     const authenticate = async (username, password, ip) => {
         const minutes = locked(ip);
 
@@ -221,7 +149,6 @@ export const createAuth = (gen, db) => {
             return { ok: false, error };
         };
 
-        // --- [EN] Mode 'password' / [FR] Mode « password » ---
         if (gen.authMode !== 'hotel') {
             if (!gen.authPassword) return { ok: false, error: 'Aucun mot de passe configuré côté serveur.' };
             if (gen.authUser && !safeEqual(username || '', gen.authUser)) return fail();
@@ -232,7 +159,6 @@ export const createAuth = (gen, db) => {
             return { ok: true, username: username || 'admin' };
         }
 
-        // --- [EN] Mode 'hotel' / [FR] Mode « hotel » ---
         if (!db.enabled) return { ok: false, error: 'Base de données indisponible.' };
         if (!username || !password) return fail();
 
@@ -246,10 +172,6 @@ export const createAuth = (gen, db) => {
             return { ok: false, error: 'Base de données injoignable.' };
         }
 
-        // [EN] Same generic message whether the account is missing or the
-        //      password is wrong — do not reveal which usernames exist.
-        // [FR] Même message générique que le compte soit absent ou le mot de
-        //      passe faux — ne pas révéler quels pseudos existent.
         if (!account) return fail();
 
         if (!await verifyPasswordHash(password, account.password)) return fail();
@@ -268,11 +190,6 @@ export const createAuth = (gen, db) => {
     return { issue, clear, session, authenticate };
 };
 
-/**
- * [EN] The login page. Same visual language as the panel, deliberately minimal.
- * [FR] La page de connexion. Même langage visuel que le panel, volontairement
- *      minimale.
- */
 export const renderLoginPage = ({
     title = 'Avatar Studio',
     action = '/Generate/login',
