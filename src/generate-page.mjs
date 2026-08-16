@@ -1,24 +1,3 @@
-// ---------------------------------------------------------------------------
-// [EN] generate-page.mjs — builds the standalone avatar generator page served
-//      at GET /Generate. It is a port of the CMS page `console/media.php`
-//      (tab "Générateur d'avatar") with every PHP/CMS dependency removed:
-//      no database, no session, no CSRF, no Bootstrap. Everything (HTML, CSS,
-//      JS) is inlined in a single response so the page also works on a LAN with
-//      no internet access, and so redistributing the service needs no extra
-//      asset files.
-//
-// [FR] generate-page.mjs — construit la page autonome du générateur d'avatars
-//      servie sur GET /Generate. C'est le portage de la page CMS
-//      `console/media.php` (onglet « Générateur d'avatar ») dont on a retiré
-//      toutes les dépendances PHP/CMS : pas de base de données, pas de session,
-//      pas de CSRF, pas de Bootstrap. Tout (HTML, CSS, JS) est intégré dans une
-//      seule réponse pour que la page fonctionne aussi sur un réseau local sans
-//      internet, et pour que la redistribution du service ne demande aucun
-//      fichier annexe.
-// ---------------------------------------------------------------------------
-
-// [EN] Minimal HTML escaper for the few server-injected strings.
-// [FR] Échappement HTML minimal pour les quelques chaînes injectées côté serveur.
 const esc = (value) => String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -26,38 +5,8 @@ const esc = (value) => String(value ?? '')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-// [EN] Server-side values are handed to the page's JS as JSON, never as raw
-//      HTML, and "</" is broken up so a value can never close the <script> tag.
-// [FR] Les valeurs serveur sont transmises au JS de la page en JSON, jamais en
-//      HTML brut, et « </ » est coupé pour qu'une valeur ne puisse jamais
-//      fermer la balise <script>.
 const js = (value) => JSON.stringify(value ?? null).replace(/</g, '\\u003c');
 
-/**
- * [EN] Render the full HTML document of the generator page.
- * [FR] Génère le document HTML complet de la page du générateur.
- *
- * @param {object}  options
- * @param {string}  options.imagerUrl   [EN] URL of the /avatarimage endpoint the page calls.
- *                                      [FR] URL du point d'entrée /avatarimage appelé par la page.
- * @param {string}  options.base        [EN] Path the panel is mounted on (for its own API calls).
- *                                      [FR] Chemin de montage du panel (pour ses propres appels d'API).
- * @param {boolean} options.lookupEnabled [EN] Show the "load a player" field.
- *                                        [FR] Afficher le champ « charger un joueur ».
- * @param {boolean} options.searchEnabled [EN] Show live username suggestions (DB only).
- *                                        [FR] Afficher les suggestions de pseudos en direct (base seulement).
- * @param {boolean} options.logoutEnabled [EN] Show the sign-out link.
- *                                        [FR] Afficher le lien de déconnexion.
- * @param {string}  options.apiKey      [EN] API key appended to image URLs (optional).
- *                                      [FR] Clé d'API ajoutée aux URLs d'images (optionnelle).
- * @param {string}  options.token       [EN] Shared secret to keep in the URL, if one is required.
- *                                      [FR] Secret partagé à conserver dans l'URL, s'il est exigé.
- * @param {string}  options.title       [EN] Page/brand title. [FR] Titre de la page / de la marque.
- * @param {string}  options.figure      [EN] Figure pre-filled on load. [FR] Figure pré-remplie au chargement.
- * @param {object}  options.query       [EN] Query params used to pre-fill the form.
- *                                      [FR] Paramètres d'URL utilisés pour pré-remplir le formulaire.
- * @returns {string} [EN] The HTML document. [FR] Le document HTML.
- */
 export const renderGeneratePage = ({
     imagerUrl = '/avatarimage',
     base = '/Generate',
@@ -70,22 +19,13 @@ export const renderGeneratePage = ({
     figure = '',
     query = {}
 } = {}) => `<!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>${esc(title)}</title>
 <style>
-/* =====================================================================
-   [EN] Design tokens. Light "studio" palette: white surfaces on a barely
-        tinted background, sky blue as the single accent, one soft shadow
-        level. No web fonts are loaded so the page renders offline.
-   [FR] Jetons de design. Palette claire « studio » : surfaces blanches sur
-        un fond à peine teinté, bleu ciel comme unique accent, un seul
-        niveau d'ombre douce. Aucune police web n'est chargée : la page
-        s'affiche hors ligne.
-   ===================================================================== */
 :root{
   --bg:#f4f8fc; --panel:#ffffff; --panel2:#f7fafd; --line:#e2ebf4;
   --text:#16212f; --muted:#69798e; --sky:#2f9bf0; --sky-dark:#1a7fd0;
@@ -106,7 +46,6 @@ body{
 }
 a{color:var(--sky-dark)}
 
-/* --- [EN] Header / [FR] En-tête ------------------------------------- */
 .top{border-bottom:1px solid var(--line); background:rgba(255,255,255,.88); backdrop-filter:blur(8px);
      position:sticky; top:0; z-index:20}
 .topIn{max-width:1240px; margin:0 auto; padding:14px 22px; display:flex; align-items:center; gap:14px}
@@ -115,7 +54,15 @@ a{color:var(--sky-dark)}
 .tagline{color:var(--muted); font-size:12px; margin-left:auto; font-family:var(--mono); letter-spacing:.05em}
 @media(max-width:700px){.tagline{display:none}}
 
-/* --- [EN] Layout / [FR] Mise en page -------------------------------- */
+.langSel{width:auto; flex:0 0 auto; background:#fff; color:var(--text); border:1px solid #d9e4ef;
+  border-radius:9px; padding:5px 24px 5px 9px; font-size:11.5px; font-weight:600;
+  font-family:var(--body); cursor:pointer;
+  appearance:none; background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+  linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 13px) 50%,calc(100% - 9px) 50%;
+  background-size:4px 4px,4px 4px; background-repeat:no-repeat}
+.langSel:hover{border-color:var(--sky)}
+
 .wrap{max-width:1240px; margin:0 auto; padding:22px}
 .grid{display:grid; grid-template-columns:352px 1fr; gap:22px; align-items:start}
 @media(max-width:980px){.grid{grid-template-columns:1fr}}
@@ -126,10 +73,6 @@ a{color:var(--sky-dark)}
 .card h2{font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase;
          color:var(--muted); margin:0 0 14px; font-weight:700}
 
-/* --- [EN] Preview: the signature block. Checkerboard = transparency,
-         sky-blue corner brackets = the "viewfinder" of the studio.
-     [FR] Aperçu : le bloc signature. Damier = transparence, équerres bleu
-         ciel = le « viseur » du studio. ---------------------------- */
 .preview{position:relative; border:1px solid var(--line); border-radius:var(--r); min-height:288px;
   display:flex; align-items:center; justify-content:center; padding:26px; overflow:hidden;
   background-color:#ffffff;
@@ -138,9 +81,7 @@ a{color:var(--sky-dark)}
   background-size:18px 18px; background-position:0 0,9px 9px;
 }
 .preview img{max-width:100%; image-rendering:pixelated; display:block}
-/* [EN] An <img> with no src draws a broken icon and its alt text; hide it until
-        a real URL is set. [FR] Une <img> sans src affiche une icône cassée et son
-        texte alternatif ; on la masque tant qu'aucune URL réelle n'est définie. */
+
 .preview img:not([src]){display:none}
 .preview::before,.preview::after{content:""; position:absolute; width:16px; height:16px; pointer-events:none}
 .preview::before{top:9px; left:9px; border-top:2px solid var(--sky); border-left:2px solid var(--sky)}
@@ -151,13 +92,11 @@ a{color:var(--sky-dark)}
       border:3px solid #d7e5f3; border-top-color:var(--sky); animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 
-/* --- [EN] Readout of the live URL / [FR] Affichage de l'URL en cours --- */
 .term{margin-top:14px; background:var(--panel2); border:1px solid var(--line); border-radius:9px;
       padding:11px 12px; font-family:var(--mono); font-size:11px; line-height:1.65;
       color:#3d5a78; word-break:break-all; max-height:132px; overflow:auto}
 .term .k{color:var(--sky-dark); font-weight:600}
 
-/* --- [EN] Form controls / [FR] Contrôles de formulaire -------------- */
 .field{margin-bottom:15px}
 .field>label{display:block; font-family:var(--mono); font-size:10.5px; letter-spacing:.13em;
   text-transform:uppercase; color:var(--muted); font-weight:700; margin-bottom:6px}
@@ -192,7 +131,6 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
 .btnRow{display:flex; gap:8px; flex-wrap:wrap}
 .btnRow .btn{flex:1; min-width:120px}
 
-/* --- [EN] Direction pickers / [FR] Sélecteurs de direction ---------- */
 .dirs{display:grid; grid-template-columns:repeat(8,1fr); gap:6px}
 @media(max-width:1200px){.dirs{grid-template-columns:repeat(4,1fr)}}
 .dir{position:relative; border:1px solid #dde8f2; border-radius:9px; background:#fff;
@@ -206,7 +144,6 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
   font-size:9px; color:#a3b3c6}
 .dir.on i{color:var(--sky-dark)}
 
-/* --- [EN] Action chips / [FR] Puces d'action ------------------------ */
 .chips{display:flex; flex-wrap:wrap; gap:8px}
 .chip{border:1px solid #d9e4ef; background:#fff; color:var(--text); border-radius:999px;
   padding:7px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:var(--body);
@@ -214,7 +151,6 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
 .chip:hover{border-color:#b6d3ee; background:var(--panel2)}
 .chip.on{border-color:var(--sky); background:var(--sky-soft); color:var(--sky-dark)}
 
-/* --- [EN] Inline messages / [FR] Messages en ligne ------------------ */
 .msg{margin-top:12px; font-size:13px; min-height:19px}
 .msg .ok{color:var(--ok); font-weight:600}
 .msg .err{color:var(--err)}
@@ -224,7 +160,6 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
 .inline{display:flex; gap:8px}
 .inline input{flex:1}
 
-/* --- [EN] Username suggestions / [FR] Suggestions de pseudos -------- */
 .sugList{margin-top:6px; border:1px solid var(--line); border-radius:9px; background:#fff;
   overflow:hidden; max-height:262px; overflow-y:auto; box-shadow:var(--shadow)}
 .sug{display:flex; align-items:center; gap:10px; width:100%; text-align:left; cursor:pointer;
@@ -245,180 +180,175 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
     <div class="brand"><b>&#9632;</b> ${esc(title)}</div>
     <div class="tagline">nitro render &middot; @pixi/node &middot; /avatarimage</div>
     ${ logoutEnabled
-        // [EN] Only rendered when the login gate is on.
-        // [FR] Affiché uniquement quand le portail de connexion est actif.
-        ? `<a class="btn" style="padding:6px 12px;font-size:12px" href="${ esc(base) }/logout">Se déconnecter</a>`
+
+        ? `<a class="btn" style="padding:6px 12px;font-size:12px" href="${ esc(base) }/logout" data-i18n="logout">Sign out</a>`
         : '' }
+    <select id="langSel" class="langSel" aria-label="Language">
+      <option value="en">English</option>
+      <option value="nl">Nederlands</option>
+      <option value="es">Espa&ntilde;ol</option>
+      <option value="fr">Fran&ccedil;ais</option>
+      <option value="de">Deutsch</option>
+    </select>
   </div>
 </header>
 
 <div class="wrap">
 <div class="grid">
 
-  <!-- [EN] LEFT: live preview, URL and export actions.
-       [FR] GAUCHE : aperçu en direct, URL et actions d'export. -->
-  <div class="col-left">
+    <div class="col-left">
     <div class="card">
-      <h2>Aperçu</h2>
+      <h2 data-i18n="preview">Preview</h2>
       <div class="preview" id="pv">
-        <img id="pvImg" alt="Aperçu de l'avatar">
+        <img id="pvImg" alt="Avatar preview" data-i18n-alt="previewAlt">
         <div class="load" id="pvLoad" style="display:none"><div class="spin"></div></div>
       </div>
       <div class="term" id="urlBox">—</div>
       <div class="btnRow" style="margin-top:12px">
-        <button type="button" class="btn" id="copyUrl">Copier l'adresse</button>
-        <a class="btn" id="dl" download="avatar.png">Télécharger</a>
+        <button type="button" class="btn" id="copyUrl" data-i18n="copyUrl">Copy URL</button>
+        <a class="btn" id="dl" download="avatar.png" data-i18n="download">Download</a>
       </div>
-      <button type="button" class="btn btn-block" id="copyImg" style="margin-top:8px">Copier la balise &lt;img&gt;</button>
-      <button type="button" class="btn btn-block" id="copyPage" style="margin-top:8px">Copier le lien de ce réglage</button>
+      <button type="button" class="btn btn-block" id="copyImg" style="margin-top:8px" data-i18n="copyImg">Copy &lt;img&gt; tag</button>
+      <button type="button" class="btn btn-block" id="copyPage" style="margin-top:8px" data-i18n="copyPage">Copy link to this setup</button>
       <div class="msg" id="msg"></div>
     </div>
   </div>
 
-  <!-- [EN] RIGHT: every render parameter. [FR] DROITE : tous les paramètres de rendu. -->
-  <div>
+    <div>
     <div class="card">
-      <h2>Personnage</h2>
-      <!-- [EN] The "load a player" field only exists when a lookup backend is
-               available (database or HTTP link). With neither, the panel is a
-               pure creation tool and the figure field takes the full width.
-           [FR] Le champ « charger un joueur » n'existe que si une source de
-               recherche est disponible (base de données ou lien HTTP). Sans
-               aucune des deux, le panel est un pur outil de création et le champ
-               figure occupe toute la largeur. -->
-      <div class="${ lookupEnabled ? 'row' : '' }">
+      <h2 data-i18n="character">Character</h2>
+            <div class="${ lookupEnabled ? 'row' : '' }">
         ${ lookupEnabled ? `<div class="field" id="userField">
-          <label for="fUser">Pseudo du joueur</label>
+          <label for="fUser" data-i18n="playerName">Player name</label>
           <div class="inline">
-            <input type="text" id="fUser" placeholder="Pseudo…" autocomplete="off" spellcheck="false">
-            <button type="button" class="btn" id="fetchLook" style="white-space:nowrap">Charger</button>
+            <input type="text" id="fUser" placeholder="Username…" data-i18n-ph="usernamePh" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn" id="fetchLook" style="white-space:nowrap" data-i18n="load">Load</button>
           </div>
-          <!-- [EN] Suggestions are injected here. [FR] Les suggestions sont injectées ici. -->
-          <div class="sugList" id="sugList" style="display:none"></div>
-          <small>${ searchEnabled ? 'Tape 2 lettres pour voir les suggestions.' : 'Récupère la tenue actuelle du joueur.' }</small>
+                    <div class="sugList" id="sugList" style="display:none"></div>
+          <small data-i18n="${ searchEnabled ? 'suggestHint' : 'lookupHint' }">${ searchEnabled ? 'Type 2 letters to see suggestions.' : 'Loads the player&#39;s current outfit.' }</small>
         </div>` : '' }
         <div class="field" style="margin-bottom:0">
-          <label for="fFigure">Figure</label>
+          <label for="fFigure" data-i18n="figure">Figure</label>
           <input type="text" id="fFigure" value="${esc(figure)}" spellcheck="false" autocomplete="off"
                  placeholder="hd-180-1.ch-255-66.lg-280-110">
-          <small>Modifiable directement.</small>
+          <small data-i18n="figureHint">Editable directly.</small>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Orientation</h2>
+      <h2 data-i18n="orientation">Orientation</h2>
       <div class="field">
-        <label>Direction du corps</label>
+        <label data-i18n="bodyDir">Body direction</label>
         <div class="dirs" id="bodyDirs"></div>
       </div>
       <div class="field" style="margin-bottom:0">
-        <label>Direction de la tête</label>
+        <label data-i18n="headDir">Head direction</label>
         <div class="dirs" id="headDirs"></div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Pose</h2>
+      <h2 data-i18n="pose">Pose</h2>
       <div class="row">
         <div class="field">
-          <label>Action</label>
+          <label data-i18n="action">Action</label>
           <div class="chips" id="actChips">
-            <button type="button" class="chip on" data-act="">Aucune</button>
-            <button type="button" class="chip" data-act="wlk">Marche</button>
-            <button type="button" class="chip" data-act="sit">Assis</button>
-            <button type="button" class="chip" data-act="lay">Allongé</button>
-            <button type="button" class="chip" data-act="wav">Salue</button>
-            <button type="button" class="chip" data-act="drk=1">Boit</button>
-            <button type="button" class="chip" data-act="crr=1">Tient</button>
+            <button type="button" class="chip on" data-act="" data-i18n="none">None</button>
+            <button type="button" class="chip" data-act="wlk" data-i18n="walk">Walk</button>
+            <button type="button" class="chip" data-act="sit" data-i18n="sit">Sit</button>
+            <button type="button" class="chip" data-act="lay" data-i18n="lay">Lie down</button>
+            <button type="button" class="chip" data-act="wav" data-i18n="wave">Wave</button>
+            <button type="button" class="chip" data-act="drk=1" data-i18n="drink">Drink</button>
+            <button type="button" class="chip" data-act="crr=1" data-i18n="carry">Carry</button>
           </div>
         </div>
         <div class="field">
-          <label for="fGesture">Expression</label>
+          <label for="fGesture" data-i18n="expression">Expression</label>
           <select id="fGesture">
-            <option value="std">Normale</option>
-            <option value="sml">Sourire</option>
-            <option value="sad">Triste</option>
-            <option value="agr">En colère</option>
-            <option value="srp">Surprise</option>
+            <option value="std" data-i18n="gestureNormal">Normal</option>
+            <option value="sml" data-i18n="gestureSmile">Smile</option>
+            <option value="sad" data-i18n="gestureSad">Sad</option>
+            <option value="agr" data-i18n="gestureAngry">Angry</option>
+            <option value="srp" data-i18n="gestureSurprised">Surprised</option>
           </select>
         </div>
       </div>
       <div class="row">
         <div class="field">
-          <label for="fSize">Taille</label>
+          <label for="fSize" data-i18n="size">Size</label>
           <select id="fSize">
-            <option value="s">Petite</option>
-            <option value="n" selected>Normale</option>
-            <option value="l">Grande</option>
+            <option value="s" data-i18n="sizeSmall">Small</option>
+            <option value="n" selected data-i18n="sizeNormal">Normal</option>
+            <option value="l" data-i18n="sizeLarge">Large</option>
           </select>
         </div>
         <div class="field">
-          <label for="fHeadonly">Cadrage</label>
+          <label for="fHeadonly" data-i18n="crop">Crop</label>
           <select id="fHeadonly">
-            <option value="0">Corps entier</option>
-            <option value="1">Tête seule</option>
+            <option value="0" data-i18n="fullBody">Full body</option>
+            <option value="1" data-i18n="headOnly">Head only</option>
           </select>
         </div>
       </div>
       <div class="row" style="margin-bottom:0">
         <div class="field" style="margin-bottom:0">
-          <label for="fEffect">Effet</label>
+          <label for="fEffect" data-i18n="effect">Effect</label>
           <input type="number" id="fEffect" value="0" min="0" max="500">
-          <small>0 = aucun.</small>
+          <small data-i18n="effectHint">0 = none.</small>
         </div>
         <div class="field" style="margin-bottom:0">
-          <label for="fDance">Danse</label>
+          <label for="fDance" data-i18n="dance">Dance</label>
           <select id="fDance">
-            <option value="0">Aucune</option>
-            <option value="1">Danse 1</option>
-            <option value="2">Danse 2</option>
-            <option value="3">Danse 3</option>
-            <option value="4">Danse 4</option>
+            <option value="0" data-i18n="none">None</option>
+            <option value="1" data-i18n="dance1">Dance 1</option>
+            <option value="2" data-i18n="dance2">Dance 2</option>
+            <option value="3" data-i18n="dance3">Dance 3</option>
+            <option value="4" data-i18n="dance4">Dance 4</option>
           </select>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Bulle de texte</h2>
+      <h2 data-i18n="bubble">Speech bubble</h2>
       <div class="field">
-        <label for="fText">Message</label>
-        <input type="text" id="fText" maxlength="100" placeholder="Laisse vide pour ne pas afficher de bulle">
+        <label for="fText" data-i18n="message">Message</label>
+        <input type="text" id="fText" maxlength="100" placeholder="Leave empty for no bubble" data-i18n-ph="msgPh">
       </div>
       <div class="row" style="margin-bottom:0">
         <div class="field" style="margin-bottom:0">
-          <label for="fTextColor">Couleur du texte</label>
+          <label for="fTextColor" data-i18n="textColor">Text colour</label>
           <input type="color" id="fTextColor" value="#000000">
         </div>
         <div class="field" style="margin-bottom:0">
-          <label for="fBubbleColor">Couleur de la bulle</label>
+          <label for="fBubbleColor" data-i18n="bubbleColor">Bubble colour</label>
           <input type="color" id="fBubbleColor" value="#ffffff">
         </div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Sortie</h2>
+      <h2 data-i18n="output">Output</h2>
       <div class="row" style="margin-bottom:0">
         <div class="field" style="margin-bottom:0">
-          <label for="fFormat">Format</label>
+          <label for="fFormat" data-i18n="format">Format</label>
           <select id="fFormat">
-            <option value="auto">Automatique</option>
-            <option value="png">PNG fixe</option>
-            <option value="apng">APNG animé</option>
+            <option value="auto" data-i18n="formatAuto">Automatic</option>
+            <option value="png" data-i18n="formatPng">Static PNG</option>
+            <option value="apng" data-i18n="formatApng">Animated APNG</option>
           </select>
-          <small>Les danses et effets nécessitent l'APNG.</small>
+          <small data-i18n="formatHint">Dances and effects need APNG.</small>
         </div>
         <div class="field" style="margin-bottom:0">
-          <label for="fFrame">Image de l'animation</label>
+          <label for="fFrame" data-i18n="frame">Animation frame</label>
           <input type="number" id="fFrame" value="0" min="0" max="60">
-          <small>Utile en PNG fixe.</small>
+          <small data-i18n="frameHint">Useful with static PNG.</small>
         </div>
       </div>
       <div class="btnRow" style="margin-top:16px">
-        <button type="button" class="btn" id="reset">Réinitialiser</button>
-        <button type="button" class="btn btn-primary" id="refresh">Régénérer l'aperçu</button>
+        <button type="button" class="btn" id="reset" data-i18n="reset">Reset</button>
+        <button type="button" class="btn btn-primary" id="refresh" data-i18n="refresh">Refresh preview</button>
       </div>
     </div>
   </div>
@@ -428,33 +358,219 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
 <div class="foot">GET /avatarimage &middot; figure · action · gesture · direction · head_direction · headonly · dance · effect · size · frame_num · img_format · text · text_color · bubble_color</div>
 
 <script>
-/* =====================================================================
-   [EN] Page logic. Same behaviour as the CMS page, minus the CMS: the
-        preview is a plain <img> pointed at /avatarimage, so what you see
-        is exactly what any site embedding that URL will get.
-   [FR] Logique de la page. Même comportement que la page CMS, sans le
-        CMS : l'aperçu est un simple <img> pointé sur /avatarimage, donc
-        ce que vous voyez est exactement ce qu'obtiendra tout site qui
-        intègre cette URL.
-   ===================================================================== */
 (function () {
   'use strict';
 
-  /* [EN] Values injected by the server. [FR] Valeurs injectées par le serveur. */
-  var IMAGER   = ${js(imagerUrl)};   // [EN] /avatarimage endpoint  [FR] point d'entrée /avatarimage
-  var BASE     = ${js(base)};        // [EN] this panel's own path  [FR] chemin propre au panel
-  var LOOKUP   = ${js(lookupEnabled)};  // [EN] pseudo -> figure on  [FR] pseudo -> figure activé
-  var SEARCH   = ${js(searchEnabled)};  // [EN] live suggestions on  [FR] suggestions activées
-  var API_KEY  = ${js(apiKey)};      // [EN] optional ?key=         [FR] ?key= optionnel
-  var TOKEN    = ${js(token)};       // [EN] page access token      [FR] jeton d'accès à la page
-  var PRESET   = ${js(query)};       // [EN] pre-fill from the URL  [FR] pré-remplissage depuis l'URL
+  var IMAGER   = ${js(imagerUrl)};
+  var BASE     = ${js(base)};
+  var LOOKUP   = ${js(lookupEnabled)};
+  var SEARCH   = ${js(searchEnabled)};
+  var API_KEY  = ${js(apiKey)};
+  var TOKEN    = ${js(token)};
+  var PRESET   = ${js(query)};
 
   var $ = function (id) { return document.getElementById(id); };
   var val = function (id) { var e = $(id); return e ? e.value : ''; };
   var hex = function (id) { return (val(id) || '').replace('#', ''); };
 
-  /* [EN] The only mutable state not held by an input.
-     [FR] Le seul état mutable qui n'est pas porté par un champ. */
+  var I18N = {
+    en: {
+      preview: 'Preview', copyUrl: 'Copy URL', download: 'Download',
+      copyImg: 'Copy <img> tag', copyPage: 'Copy link to this setup',
+      character: 'Character', playerName: 'Player name', load: 'Load',
+      usernamePh: 'Username…', suggestHint: 'Type 2 letters to see suggestions.',
+      lookupHint: "Loads the player's current outfit.",
+      figure: 'Figure', figureHint: 'Editable directly.',
+      orientation: 'Orientation', bodyDir: 'Body direction', headDir: 'Head direction',
+      pose: 'Pose', action: 'Action', none: 'None', walk: 'Walk', sit: 'Sit',
+      lay: 'Lie down', wave: 'Wave', drink: 'Drink', carry: 'Carry',
+      expression: 'Expression', gestureNormal: 'Normal', gestureSmile: 'Smile',
+      gestureSad: 'Sad', gestureAngry: 'Angry', gestureSurprised: 'Surprised',
+      size: 'Size', sizeSmall: 'Small', sizeNormal: 'Normal', sizeLarge: 'Large',
+      crop: 'Crop', fullBody: 'Full body', headOnly: 'Head only',
+      effect: 'Effect', effectHint: '0 = none.', dance: 'Dance',
+      dance1: 'Dance 1', dance2: 'Dance 2', dance3: 'Dance 3', dance4: 'Dance 4',
+      bubble: 'Speech bubble', message: 'Message', msgPh: 'Leave empty for no bubble',
+      textColor: 'Text colour', bubbleColor: 'Bubble colour',
+      output: 'Output', format: 'Format', formatAuto: 'Automatic',
+      formatPng: 'Static PNG', formatApng: 'Animated APNG',
+      formatHint: 'Dances and effects need APNG.',
+      frame: 'Animation frame', frameHint: 'Useful with static PNG.',
+      reset: 'Reset', refresh: 'Refresh preview', logout: 'Sign out',
+      noFigure: 'Enter a figure to start rendering.',
+      searching: 'Looking up {name}…', loaded: "Loaded {name}'s outfit.",
+      notFound: 'Player not found.', lookupDown: 'Lookup unavailable.',
+      copied: 'Copied!', tagCopied: 'Tag copied!', linkCopied: 'Link copied!',
+      copyDenied: 'Copy blocked by the browser (HTTPS required).',
+      direction: 'Direction', previewAlt: 'Avatar preview'
+    },
+    nl: {
+      preview: 'Voorbeeld', copyUrl: 'Adres kopiëren', download: 'Downloaden',
+      copyImg: '<img>-tag kopiëren', copyPage: 'Link naar deze instelling kopiëren',
+      character: 'Personage', playerName: 'Spelersnaam', load: 'Laden',
+      usernamePh: 'Spelersnaam…', suggestHint: 'Typ 2 letters voor suggesties.',
+      lookupHint: 'Haalt de huidige outfit van de speler op.',
+      figure: 'Figuur', figureHint: 'Direct aanpasbaar.',
+      orientation: 'Oriëntatie', bodyDir: 'Richting lichaam', headDir: 'Richting hoofd',
+      pose: 'Pose', action: 'Actie', none: 'Geen', walk: 'Lopen', sit: 'Zitten',
+      lay: 'Liggen', wave: 'Zwaaien', drink: 'Drinken', carry: 'Vasthouden',
+      expression: 'Expressie', gestureNormal: 'Normaal', gestureSmile: 'Lachen',
+      gestureSad: 'Verdrietig', gestureAngry: 'Boos', gestureSurprised: 'Verrast',
+      size: 'Grootte', sizeSmall: 'Klein', sizeNormal: 'Normaal', sizeLarge: 'Groot',
+      crop: 'Kader', fullBody: 'Volledig lichaam', headOnly: 'Alleen hoofd',
+      effect: 'Effect', effectHint: '0 = geen.', dance: 'Dans',
+      dance1: 'Dans 1', dance2: 'Dans 2', dance3: 'Dans 3', dance4: 'Dans 4',
+      bubble: 'Tekstballon', message: 'Bericht', msgPh: 'Laat leeg voor geen ballon',
+      textColor: 'Tekstkleur', bubbleColor: 'Ballonkleur',
+      output: 'Uitvoer', format: 'Formaat', formatAuto: 'Automatisch',
+      formatPng: 'Statische PNG', formatApng: 'Geanimeerde APNG',
+      formatHint: 'Dansen en effecten vereisen APNG.',
+      frame: 'Animatieframe', frameHint: 'Handig bij statische PNG.',
+      reset: 'Herstellen', refresh: 'Voorbeeld vernieuwen', logout: 'Uitloggen',
+      noFigure: 'Voer een figuur in om te renderen.',
+      searching: 'Zoeken naar {name}…', loaded: 'Outfit van {name} geladen.',
+      notFound: 'Speler niet gevonden.', lookupDown: 'Zoeken niet beschikbaar.',
+      copied: 'Gekopieerd!', tagCopied: 'Tag gekopieerd!', linkCopied: 'Link gekopieerd!',
+      copyDenied: 'Kopiëren geblokkeerd door de browser (HTTPS vereist).',
+      direction: 'Richting', previewAlt: 'Avatarvoorbeeld'
+    },
+    es: {
+      preview: 'Vista previa', copyUrl: 'Copiar URL', download: 'Descargar',
+      copyImg: 'Copiar etiqueta <img>', copyPage: 'Copiar enlace a esta configuración',
+      character: 'Personaje', playerName: 'Nombre del jugador', load: 'Cargar',
+      usernamePh: 'Nombre…', suggestHint: 'Escribe 2 letras para ver sugerencias.',
+      lookupHint: 'Carga el atuendo actual del jugador.',
+      figure: 'Figura', figureHint: 'Editable directamente.',
+      orientation: 'Orientación', bodyDir: 'Dirección del cuerpo', headDir: 'Dirección de la cabeza',
+      pose: 'Pose', action: 'Acción', none: 'Ninguna', walk: 'Caminar', sit: 'Sentarse',
+      lay: 'Tumbarse', wave: 'Saludar', drink: 'Beber', carry: 'Sujetar',
+      expression: 'Expresión', gestureNormal: 'Normal', gestureSmile: 'Sonrisa',
+      gestureSad: 'Triste', gestureAngry: 'Enfadado', gestureSurprised: 'Sorprendido',
+      size: 'Tamaño', sizeSmall: 'Pequeño', sizeNormal: 'Normal', sizeLarge: 'Grande',
+      crop: 'Encuadre', fullBody: 'Cuerpo entero', headOnly: 'Solo cabeza',
+      effect: 'Efecto', effectHint: '0 = ninguno.', dance: 'Baile',
+      dance1: 'Baile 1', dance2: 'Baile 2', dance3: 'Baile 3', dance4: 'Baile 4',
+      bubble: 'Bocadillo de texto', message: 'Mensaje', msgPh: 'Déjalo vacío para no mostrar bocadillo',
+      textColor: 'Color del texto', bubbleColor: 'Color del bocadillo',
+      output: 'Salida', format: 'Formato', formatAuto: 'Automático',
+      formatPng: 'PNG estático', formatApng: 'APNG animado',
+      formatHint: 'Los bailes y efectos requieren APNG.',
+      frame: 'Fotograma de la animación', frameHint: 'Útil con PNG estático.',
+      reset: 'Restablecer', refresh: 'Regenerar vista previa', logout: 'Cerrar sesión',
+      noFigure: 'Introduce una figura para renderizar.',
+      searching: 'Buscando a {name}…', loaded: 'Atuendo de {name} cargado.',
+      notFound: 'Jugador no encontrado.', lookupDown: 'Búsqueda no disponible.',
+      copied: '¡Copiado!', tagCopied: '¡Etiqueta copiada!', linkCopied: '¡Enlace copiado!',
+      copyDenied: 'Copia bloqueada por el navegador (se requiere HTTPS).',
+      direction: 'Dirección', previewAlt: 'Vista previa del avatar'
+    },
+    fr: {
+      preview: 'Aperçu', copyUrl: "Copier l'adresse", download: 'Télécharger',
+      copyImg: 'Copier la balise <img>', copyPage: 'Copier le lien de ce réglage',
+      character: 'Personnage', playerName: 'Pseudo du joueur', load: 'Charger',
+      usernamePh: 'Pseudo…', suggestHint: 'Tape 2 lettres pour voir les suggestions.',
+      lookupHint: 'Récupère la tenue actuelle du joueur.',
+      figure: 'Figure', figureHint: 'Modifiable directement.',
+      orientation: 'Orientation', bodyDir: 'Direction du corps', headDir: 'Direction de la tête',
+      pose: 'Pose', action: 'Action', none: 'Aucune', walk: 'Marche', sit: 'Assis',
+      lay: 'Allongé', wave: 'Salue', drink: 'Boit', carry: 'Tient',
+      expression: 'Expression', gestureNormal: 'Normale', gestureSmile: 'Sourire',
+      gestureSad: 'Triste', gestureAngry: 'En colère', gestureSurprised: 'Surprise',
+      size: 'Taille', sizeSmall: 'Petite', sizeNormal: 'Normale', sizeLarge: 'Grande',
+      crop: 'Cadrage', fullBody: 'Corps entier', headOnly: 'Tête seule',
+      effect: 'Effet', effectHint: '0 = aucun.', dance: 'Danse',
+      dance1: 'Danse 1', dance2: 'Danse 2', dance3: 'Danse 3', dance4: 'Danse 4',
+      bubble: 'Bulle de texte', message: 'Message', msgPh: 'Laisse vide pour ne pas afficher de bulle',
+      textColor: 'Couleur du texte', bubbleColor: 'Couleur de la bulle',
+      output: 'Sortie', format: 'Format', formatAuto: 'Automatique',
+      formatPng: 'PNG fixe', formatApng: 'APNG animé',
+      formatHint: "Les danses et effets nécessitent l'APNG.",
+      frame: "Image de l'animation", frameHint: 'Utile en PNG fixe.',
+      reset: 'Réinitialiser', refresh: "Régénérer l'aperçu", logout: 'Se déconnecter',
+      noFigure: 'Indique une figure pour lancer le rendu.',
+      searching: 'Recherche de {name}…', loaded: 'Tenue de {name} chargée.',
+      notFound: 'Joueur introuvable.', lookupDown: 'Recherche indisponible.',
+      copied: 'Copié !', tagCopied: 'Balise copiée !', linkCopied: 'Lien copié !',
+      copyDenied: 'Copie refusée par le navigateur (HTTPS requis).',
+      direction: 'Direction', previewAlt: "Aperçu de l'avatar"
+    },
+    de: {
+      preview: 'Vorschau', copyUrl: 'Adresse kopieren', download: 'Herunterladen',
+      copyImg: '<img>-Tag kopieren', copyPage: 'Link zu dieser Einstellung kopieren',
+      character: 'Charakter', playerName: 'Spielername', load: 'Laden',
+      usernamePh: 'Spielername…', suggestHint: 'Tippe 2 Buchstaben für Vorschläge.',
+      lookupHint: 'Lädt das aktuelle Outfit des Spielers.',
+      figure: 'Figur', figureHint: 'Direkt bearbeitbar.',
+      orientation: 'Ausrichtung', bodyDir: 'Körperrichtung', headDir: 'Kopfrichtung',
+      pose: 'Pose', action: 'Aktion', none: 'Keine', walk: 'Gehen', sit: 'Sitzen',
+      lay: 'Liegen', wave: 'Winken', drink: 'Trinken', carry: 'Halten',
+      expression: 'Ausdruck', gestureNormal: 'Normal', gestureSmile: 'Lächeln',
+      gestureSad: 'Traurig', gestureAngry: 'Wütend', gestureSurprised: 'Überrascht',
+      size: 'Größe', sizeSmall: 'Klein', sizeNormal: 'Normal', sizeLarge: 'Groß',
+      crop: 'Ausschnitt', fullBody: 'Ganzer Körper', headOnly: 'Nur Kopf',
+      effect: 'Effekt', effectHint: '0 = keiner.', dance: 'Tanz',
+      dance1: 'Tanz 1', dance2: 'Tanz 2', dance3: 'Tanz 3', dance4: 'Tanz 4',
+      bubble: 'Sprechblase', message: 'Nachricht', msgPh: 'Leer lassen für keine Sprechblase',
+      textColor: 'Textfarbe', bubbleColor: 'Blasenfarbe',
+      output: 'Ausgabe', format: 'Format', formatAuto: 'Automatisch',
+      formatPng: 'Statisches PNG', formatApng: 'Animiertes APNG',
+      formatHint: 'Tänze und Effekte benötigen APNG.',
+      frame: 'Animationsbild', frameHint: 'Nützlich bei statischem PNG.',
+      reset: 'Zurücksetzen', refresh: 'Vorschau aktualisieren', logout: 'Abmelden',
+      noFigure: 'Gib eine Figur ein, um zu rendern.',
+      searching: 'Suche nach {name}…', loaded: 'Outfit von {name} geladen.',
+      notFound: 'Spieler nicht gefunden.', lookupDown: 'Suche nicht verfügbar.',
+      copied: 'Kopiert!', tagCopied: 'Tag kopiert!', linkCopied: 'Link kopiert!',
+      copyDenied: 'Kopieren vom Browser blockiert (HTTPS erforderlich).',
+      direction: 'Richtung', previewAlt: 'Avatar-Vorschau'
+    }
+  };
+
+  var LANG_KEY = 'avatar-studio.lang';
+
+  function detectLang() {
+    try {
+      var saved = localStorage.getItem(LANG_KEY);
+      if (saved && I18N[saved]) { return saved; }
+    } catch (e) {}
+    var nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
+    return I18N[nav] ? nav : 'en';
+  }
+
+  var LANG = detectLang();
+
+  function t(key, vars) {
+    var dict = I18N[LANG] || I18N.en;
+    var text = dict[key] !== undefined ? dict[key] : (I18N.en[key] !== undefined ? I18N.en[key] : key);
+    if (vars) {
+      Object.keys(vars).forEach(function (k) { text = text.split('{' + k + '}').join(vars[k]); });
+    }
+    return text;
+  }
+
+  function setMsg(cls, text) {
+    $msg.textContent = '';
+    if (!text) { return; }
+    var span = document.createElement('span');
+    span.className = cls;
+    span.textContent = text;
+    $msg.appendChild(span);
+  }
+
+  function applyLang() {
+    document.documentElement.lang = LANG;
+    var nodes = document.querySelectorAll('[data-i18n]');
+    for (var i = 0; i < nodes.length; i++) { nodes[i].textContent = t(nodes[i].getAttribute('data-i18n')); }
+    nodes = document.querySelectorAll('[data-i18n-ph]');
+    for (var j = 0; j < nodes.length; j++) { nodes[j].setAttribute('placeholder', t(nodes[j].getAttribute('data-i18n-ph'))); }
+    nodes = document.querySelectorAll('[data-i18n-alt]');
+    for (var k = 0; k < nodes.length; k++) { nodes[k].setAttribute('alt', t(nodes[k].getAttribute('data-i18n-alt'))); }
+    nodes = document.querySelectorAll('.dir');
+    for (var m = 0; m < nodes.length; m++) { nodes[m].title = t('direction') + ' ' + nodes[m].dataset.dir; }
+    var sel = $('langSel');
+    if (sel) { sel.value = LANG; }
+  }
+
   var state = { direction: 2, head_direction: 2, action: '' };
 
   var $fig = $('fFigure');
@@ -465,15 +581,6 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
   var $msg = $('msg');
   var timer = null;
 
-  /* ----------------------------------------------------------------
-     [EN] Build the /avatarimage query from the form. Mirrors the
-          buildParams() of media.php: only non-default values are sent so
-          the produced URL stays short and cache-friendly.
-     [FR] Construit la requête /avatarimage à partir du formulaire.
-          Reprend le buildParams() de media.php : seules les valeurs non
-          par défaut sont envoyées, pour garder une URL courte et bien
-          mise en cache.
-     ---------------------------------------------------------------- */
   function buildParams(extra) {
     var p = {};
     p.figure = ($fig.value || '').trim();
@@ -505,16 +612,12 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
     }).join('&');
   }
 
-  /* [EN] Append the API key only when the service actually requires one.
-     [FR] N'ajoute la clé d'API que si le service en exige une. */
   function imageUrl(p) {
     var q = qs(p);
     if (API_KEY) { q += '&key=' + encodeURIComponent(API_KEY); }
     return IMAGER + '?' + q;
   }
 
-  /* [EN] Colourise the query string in the terminal readout.
-     [FR] Colorise la chaîne de requête dans l'affichage terminal. */
   function paintUrl(url) {
     var cut = url.indexOf('?');
     var head = cut === -1 ? url : url.slice(0, cut + 1);
@@ -529,17 +632,10 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
     $urlBox.innerHTML = html;
   }
 
-  /* ----------------------------------------------------------------
-     [EN] Refresh preview + URL + thumbnails, and keep the page URL in
-          sync so the current settings can simply be bookmarked/shared.
-     [FR] Rafraîchit l'aperçu, l'URL et les vignettes, et garde l'URL de
-          la page synchronisée : le réglage courant est donc partageable
-          par simple copie du lien.
-     ---------------------------------------------------------------- */
   function refresh() {
     var params = buildParams();
     if (!params.figure) {
-      $urlBox.textContent = 'Indique une figure pour lancer le rendu.';
+      $urlBox.textContent = t('noFigure');
       $img.removeAttribute('src');
       return;
     }
@@ -551,9 +647,6 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
     $img.onload = $img.onerror = function () { $load.style.display = 'none'; };
     $img.src = url;
 
-    /* [EN] Keep the access token in the address bar, or reloading the page
-           would 404. [FR] Garde le jeton d'accès dans la barre d'adresse, sinon
-           un rechargement de la page renverrait une 404. */
     try {
       var pageQs = qs(params) + (TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '');
       history.replaceState(null, '', location.pathname + '?' + pageQs);
@@ -561,17 +654,8 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
     drawDirs();
   }
 
-  /* [EN] Debounce for text/number inputs. [FR] Anti-rebond pour les champs texte/nombre. */
   function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 350); }
 
-  /* ----------------------------------------------------------------
-     [EN] The two 8-way direction strips. Each cell is itself a tiny
-          render (size=s), so the picker shows the real avatar rather
-          than an arrow icon.
-     [FR] Les deux bandes de direction sur 8 positions. Chaque case est
-          elle-même un mini-rendu (size=s) : le sélecteur montre donc le
-          vrai avatar plutôt qu'une icône de flèche.
-     ---------------------------------------------------------------- */
   function buildDirGrids() {
     var host = { direction: $('bodyDirs'), head_direction: $('headDirs') };
     for (var d = 0; d < 8; d++) {
@@ -581,7 +665,7 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
         b.className = 'dir';
         b.dataset.kind = kind;
         b.dataset.dir = d;
-        b.title = 'Direction ' + d;
+        b.title = t('direction') + ' ' + d;
         b.innerHTML = '<i>' + d + '</i><img alt="">';
         b.addEventListener('click', function () {
           state[this.dataset.kind] = parseInt(this.dataset.dir, 10);
@@ -610,17 +694,11 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
       }
       var u = imageUrl(p);
       var im = b.querySelector('img');
-      /* [EN] Only touch src when it changed, or the browser refetches 16
-             images on every keystroke. [FR] On ne touche à src que s'il a
-             changé, sinon le navigateur recharge 16 images à chaque frappe. */
+
       if (im.getAttribute('src') !== u) { im.src = u; }
     }
   }
 
-  /* ----------------------------------------------------------------
-     [EN] Wire up the inputs.
-     [FR] Branchement des champs.
-     ---------------------------------------------------------------- */
   var chips = document.querySelectorAll('#actChips .chip');
   for (var c = 0; c < chips.length; c++) {
     chips[c].addEventListener('click', function () {
@@ -641,8 +719,6 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
   $fig.addEventListener('input', schedule);
   $('refresh').addEventListener('click', refresh);
 
-  /* [EN] Reset returns every control to the service defaults.
-     [FR] La réinitialisation remet chaque contrôle aux valeurs par défaut. */
   $('reset').addEventListener('click', function () {
     state = { direction: 2, head_direction: 2, action: '' };
     $('fGesture').value = 'std'; $('fSize').value = 'n'; $('fHeadonly').value = '0';
@@ -653,58 +729,34 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
     refresh();
   });
 
-  /* ----------------------------------------------------------------
-     [EN] Username -> figure. Replaces the CMS SQL query: the service
-          proxies the lookup to whatever endpoint the hotel configured
-          (AVATAR_IMAGING_LOOKUP_URL), so no database driver is needed.
-          When it is not configured the field is hidden entirely.
-     [FR] Pseudo -> figure. Remplace la requête SQL du CMS : le service
-          relaie la recherche vers le point d'entrée configuré par
-          l'hôtel (AVATAR_IMAGING_LOOKUP_URL), aucun pilote de base de
-          données n'est donc nécessaire. Si ce n'est pas configuré, le
-          champ est simplement masqué.
-     ---------------------------------------------------------------- */
   var tokenQs = TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '';
 
-  /* [EN] No lookup backend => the field was never rendered, nothing to wire.
-     [FR] Aucune source de recherche => le champ n'a jamais été rendu, rien à brancher. */
   if (LOOKUP && $('fUser')) {
     var $sug = $('sugList');
     var sugTimer = null;
 
-    /* [EN] Exact pseudo -> figure (the "Charger" button and Enter).
-       [FR] Pseudo exact -> figure (le bouton « Charger » et Entrée). */
     var doLookup = function (name) {
       var u = (name || val('fUser') || '').trim();
       if (!u) { return; }
       hideSug();
-      $msg.innerHTML = '<span class="wait">Recherche de ' + u.replace(/[<>&]/g, '') + '…</span>';
+      setMsg('wait', t('searching', { name: u }));
       fetch(BASE + '/look?username=' + encodeURIComponent(u) + tokenQs, { headers: { 'Accept': 'application/json' } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d && d.ok && d.figure) {
             $fig.value = d.figure;
             $('fUser').value = d.username || u;
-            $msg.innerHTML = '<span class="ok">Tenue de ' + (d.username || u).replace(/[<>&]/g, '') + ' chargée.</span>';
+            setMsg('ok', t('loaded', { name: d.username || u }));
             refresh();
           } else {
-            $msg.innerHTML = '<span class="err">' + ((d && d.error) || 'Joueur introuvable.') + '</span>';
+            setMsg('err', (d && d.error) || t('notFound'));
           }
         })
-        .catch(function () { $msg.innerHTML = '<span class="err">Recherche indisponible.</span>'; });
+        .catch(function () { setMsg('err', t('lookupDown')); });
     };
 
     function hideSug() { if ($sug) { $sug.style.display = 'none'; $sug.innerHTML = ''; } }
 
-    /* ----------------------------------------------------------------
-       [EN] Live suggestions while typing (database mode only). Each row
-            shows the player's real head next to the name, so picking the
-            right "Val" among five is a glance rather than a guess.
-       [FR] Suggestions en direct pendant la saisie (mode base de données
-            uniquement). Chaque ligne montre la vraie tête du joueur à côté
-            du nom : choisir le bon « Val » parmi cinq se fait d'un coup
-            d'œil plutôt qu'au hasard.
-       ---------------------------------------------------------------- */
     function suggest() {
       if (!SEARCH || !$sug) { return; }
       var q = (val('fUser') || '').trim();
@@ -720,13 +772,18 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
             li.type = 'button';
             li.className = 'sug';
             var head = imageUrl({ figure: row.figure, headonly: 1, size: 's', direction: 2, head_direction: 2 });
-            li.innerHTML = '<img alt="" src="' + head + '"><span></span>';
-            li.querySelector('span').textContent = row.username;
+            var im = document.createElement('img');
+            im.alt = '';
+            im.src = head;
+            var name = document.createElement('span');
+            name.textContent = row.username;
+            li.appendChild(im);
+            li.appendChild(name);
             li.addEventListener('click', function () {
               $('fUser').value = row.username;
               $fig.value = row.figure;
               hideSug();
-              $msg.innerHTML = '<span class="ok">Tenue de ' + row.username.replace(/[<>&]/g, '') + ' chargée.</span>';
+              setMsg('ok', t('loaded', { name: row.username }));
               refresh();
             });
             $sug.appendChild(li);
@@ -745,22 +802,12 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
       if (e.key === 'Enter') { e.preventDefault(); doLookup(); }
       if (e.key === 'Escape') { hideSug(); }
     });
-    /* [EN] Close the list when clicking elsewhere. [FR] Ferme la liste au clic ailleurs. */
+
     document.addEventListener('click', function (e) {
       if ($sug && !$('userField').contains(e.target)) { hideSug(); }
     });
   }
 
-  /* ----------------------------------------------------------------
-     [EN] Export helpers. The CMS version saved into the media library;
-          standalone, the useful equivalents are: copy the image URL,
-          copy a ready-made <img> tag, copy a link to this exact setup,
-          and download the file.
-     [FR] Aides à l'export. La version CMS enregistrait dans la
-          médiathèque ; en autonome, les équivalents utiles sont : copier
-          l'URL de l'image, copier une balise <img> prête à l'emploi,
-          copier un lien vers ce réglage exact, et télécharger le fichier.
-     ---------------------------------------------------------------- */
   function copy(text, btn, label) {
     var done = function () {
       var old = btn.textContent;
@@ -769,10 +816,10 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done, function () {
-        $msg.innerHTML = '<span class="err">Copie refusée par le navigateur (HTTPS requis).</span>';
+        setMsg('err', t('copyDenied'));
       });
     } else {
-      /* [EN] Fallback for plain-HTTP origins. [FR] Repli pour les origines en HTTP simple. */
+
       var ta = document.createElement('textarea');
       ta.value = text; document.body.appendChild(ta); ta.select();
       try { document.execCommand('copy'); done(); } catch (e) {}
@@ -781,25 +828,23 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
   }
 
   $('copyUrl').addEventListener('click', function () {
-    copy(imageUrl(buildParams()), this, 'Copié !');
+    copy(imageUrl(buildParams()), this, t('copied'));
   });
   $('copyImg').addEventListener('click', function () {
-    copy('<img src="' + imageUrl(buildParams()) + '" alt="avatar">', this, 'Balise copiée !');
+    copy('<img src="' + imageUrl(buildParams()) + '" alt="avatar">', this, t('tagCopied'));
   });
   $('copyPage').addEventListener('click', function () {
     var link = location.origin + location.pathname + '?' + qs(buildParams()) +
                (TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '');
-    copy(link, this, 'Lien copié !');
+    copy(link, this, t('linkCopied'));
   });
 
-  /* ----------------------------------------------------------------
-     [EN] Pre-fill from the page's own query string, so /Generate?figure=…
-          &effect=14 opens ready to tweak (and the "copy this setup" link
-          round-trips).
-     [FR] Pré-remplissage depuis la chaîne de requête de la page :
-          /Generate?figure=…&effect=14 s'ouvre donc prêt à être ajusté (et
-          le lien « copier ce réglage » fait bien l'aller-retour).
-     ---------------------------------------------------------------- */
+  $('langSel').addEventListener('change', function () {
+    LANG = I18N[this.value] ? this.value : 'en';
+    try { localStorage.setItem(LANG_KEY, LANG); } catch (e) {}
+    applyLang();
+  });
+
   function applyPreset(p) {
     if (!p) { return; }
     if (p.figure) { $fig.value = p.figure; }
@@ -819,6 +864,7 @@ input[type=color]{width:100%; height:42px; padding:3px; background:#fff;
   }
 
   buildDirGrids();
+  applyLang();
   applyPreset(PRESET);
   refresh();
 })();

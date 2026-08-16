@@ -37,7 +37,7 @@ deploy — worthwhile at volume (e.g. ~10k renders/day).
   prebuilt binaries need it, see [Windows](#windows)).**
 - **Native modules** — `@pixi/node@8` declares its natives as *peer* deps, so
   this package lists them explicitly: `canvas` (node-canvas `^3.2.0`) and `gl`
-  (headless-gl `^8.1.6`). `npm install` uses a prebuilt binary when one exists
+  (headless-gl `^8.1.6`). `yarn install` uses a prebuilt binary when one exists
   for your OS + Node version, and only compiles from source as a fallback.
   - **Debian/Ubuntu** (production target):
     ```
@@ -57,22 +57,20 @@ deploy — worthwhile at volume (e.g. ~10k renders/day).
   registers a real `.ttf` as family "Arial" (`?text=` rendering). It auto-scans
   the standard Linux (Liberation/DejaVu), Windows (`C:\Windows\Fonts\arial.ttf`)
   and macOS Arial paths; set `AVATAR_IMAGING_FONT_FILE` for a specific file.
-- The **Nitro renderer**, linked exactly like the browser service / Nitro-UI:
-  ```
-  cd ../Nitro-Renderer && yarn install && yarn link
-  cd ../avatar-imaging-pixinode && yarn link "@nitrots/nitro-renderer"
-  ```
-  (or set `NITRO_RENDERER_PATH` to the renderer directory).
+- The **Nitro renderer**: keep its checkout as a sibling directory
+  (`../Nitro-Renderer`, picked up automatically) or set `NITRO_RENDERER_PATH`
+  to the renderer directory. Run `yarn install` inside the renderer once.
 
 ## Setup
 
 ```
-npm install                       # pulls @pixi/node (+ native gl/canvas), express, vite
+corepack enable                   # once per machine: provides the pinned yarn 4.18
+yarn install                      # pulls @pixi/node (+ native gl/canvas), express, vite
 cp .env.example .env              # point NITRO_GAMEDATA_URL / NITRO_ASSET_URL at your hotel
-npm run build                     # bundles harness/boot-node.ts -> dist-node/boot-node.mjs
+yarn build                        # bundles harness/boot-node.ts -> dist-node/boot-node.mjs
 ```
 
-Instead of the yarn-link, you can point the build at the renderer from `.env` —
+Instead of the sibling folder, you can point the build at the renderer from `.env` —
 it is read by the Vite config, so there is no shell variable to re-export before
 every build (which is easy to lose on Windows):
 
@@ -118,6 +116,15 @@ Notes:
   `docker compose up -d --build`.
 - `docker compose logs -f` for output; `docker compose ps` shows `healthy` once
   the renderer has booted (the healthcheck polls `/health`).
+- **Editing `src/` without rebuilding:** the server sources are not bundled —
+  only the renderer engine in `dist-node/` is baked at build time. Start with
+  the dev overlay and every save of a `src/` file (e.g. the `/Generate` page)
+  restarts the server in-place, no image rebuild:
+  ```
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+  ```
+  Rebuild only when `package.json`/`yarn.lock` change (new dependencies) or the
+  bundled renderer must change (`harness/`, the Vite config, `RENDERER_REF`).
 
 ## Windows
 
@@ -127,8 +134,8 @@ command below.
 
 1. **Use Node 20 LTS.** This matters: `gl` (headless-gl) only ships prebuilt
    Windows binaries for LTS lines, and Node 20 has the widest coverage, so
-   `npm install` downloads a ready `.node` and **compiles nothing**. Do NOT use
-   Current/nightly (24, 26, …) — no prebuild exists for them, so npm falls back to
+   `yarn install` downloads a ready `.node` and **compiles nothing**. Do NOT use
+   Current/nightly (24, 26, …) — no prebuild exists for them, so the install falls back to
    a source build that needs Python + Visual Studio and usually fails. Install the
    "20.x LTS" build from [nodejs.org](https://nodejs.org), or with nvm-windows:
    ```
@@ -136,22 +143,23 @@ command below.
    nvm use 20
    node -v          :: must print v20.x
    ```
-2. **Link the renderer** (Developer PowerShell, in the repo root):
+2. **Prepare the renderer** (Developer PowerShell, in the repo root):
    ```
-   cd ..\Nitro-Renderer ; yarn install ; yarn link
-   cd ..\avatar-imaging-pixinode ; yarn link "@nitrots/nitro-renderer"
+   cd ..\Nitro-Renderer ; yarn install
    ```
-   (or set `NITRO_RENDERER_PATH` to the renderer folder.)
+   The build finds it as the sibling folder automatically (or set
+   `NITRO_RENDERER_PATH` to the renderer folder).
 3. **Install, configure, build:**
    ```
-   npm install
+   corepack enable
+   yarn install
    copy .env.example .env      :: then edit NITRO_GAMEDATA_URL / NITRO_ASSET_URL
-   npm run build
+   yarn build
    ```
    On Node 20 this pulls prebuilt `canvas` + `gl` binaries — no compiler needed.
 4. **Run** (no `xvfb`):
    ```
-   npm start
+   yarn start
    :: or a one-shot render:
    node render.mjs --figure=hd-180-1.ch-255-66.lg-280-110.sh-305-62 --out=out\plain.png
    ```
@@ -167,13 +175,13 @@ command below.
   ```
   nvm use 20
   rmdir /s /q node_modules
-  yarn install        :: or npm install
+  yarn install
   ```
 - **Only if you must build from source** (staying on a non-LTS Node): install
   **Python 3.12 from python.org** (tick *"Add python.exe to PATH"* — a Microsoft
   Store Python or a broken install shows up as `find Python ... version is ""`),
   and **Visual Studio Build Tools** with *"Desktop development with C++"*, then
-  `npm config set python "C:\Path\To\python.exe"` and reinstall. node-canvas from
+  set the `npm_config_python` environment variable to your python.exe and reinstall. node-canvas from
   source may also want the GTK bundle — see the
   [node-canvas Windows wiki](https://github.com/Automattic/node-canvas/wiki/Installation:-Windows).
   Node 20 + prebuilds avoids all of this.
@@ -191,12 +199,12 @@ command below.
 Same contract as the browser service (`GET /avatarimage`, `/health`, `/`):
 
 ```
-xvfb-run -a npm start             # boots the renderer once, listens on :8082 (AVATAR_IMAGING_PORT)
+xvfb-run -a yarn start            # boots the renderer once, listens on :8082 (AVATAR_IMAGING_PORT)
 # then:
 curl 'http://localhost:8082/avatarimage?figure=hd-180-1.ch-255-66.lg-280-110.sh-305-62&effect=14&img_format=apng' -o out.png
 ```
 
-`npm run serve` does `build` + `start`. The renderer is initialized **once** and
+`yarn serve` does `build` + `start`. The renderer is initialized **once** and
 reused across requests. Because there is a single WebGL context, renders are
 **serialized** (one at a time) with a bounded queue that sheds load with `503`
 past `AVATAR_IMAGING_MAX_QUEUE`. A per-request response cache + ETags mean repeat
@@ -407,8 +415,8 @@ The expensive part of this project is the build: cloning the Nitro renderer and
 bundling it with Vite. Do it once, then ship the result.
 
 ```
-npm run build     # -> dist-node/boot-node.mjs
-npm run pack      # -> release/<name>-<version>.tar.gz
+yarn build        # -> dist-node/boot-node.mjs
+yarn run pack     # -> release/<name>-<version>.tar.gz  (run, not bare: yarn's own pack would shadow it)
 ```
 
 The archive holds `dist-node/`, `src/`, a `package.json` cut down to the runtime
@@ -417,7 +425,7 @@ clone and Vite entirely, `.env.example` and an `INSTALL.md`. Recipients run:
 
 ```
 cp .env.example .env
-docker compose up -d --build      # or: npm install --omit=dev && xvfb-run -a npm start
+docker compose up -d --build      # or: yarn workspaces focus --all --production && xvfb-run -a yarn start
 ```
 
 No renderer checkout, no Vite, no `yarn link` on their side. Only `canvas` and

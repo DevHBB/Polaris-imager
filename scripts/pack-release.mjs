@@ -1,26 +1,3 @@
-// ---------------------------------------------------------------------------
-// [EN] pack-release.mjs — package an ALREADY BUILT service for redistribution.
-//      The expensive part of this project is the build: cloning the Nitro
-//      renderer and bundling it with Vite. This script takes the result of that
-//      build (dist-node/boot-node.mjs) and produces a folder + tarball that
-//      other people can run with just `npm install --omit=dev && npm start` —
-//      no renderer checkout, no Vite, no yarn link.
-//
-//      Usage:  npm run build   (once, on your machine)
-//              npm run pack    (produces release/<name>-<version>.tar.gz)
-//
-// [FR] pack-release.mjs — empaquette un service DÉJÀ COMPILÉ pour la
-//      redistribution. La partie coûteuse de ce projet est la compilation :
-//      cloner le moteur Nitro et le bundler avec Vite. Ce script reprend le
-//      résultat de cette compilation (dist-node/boot-node.mjs) et produit un
-//      dossier + une archive que d'autres personnes peuvent lancer avec un
-//      simple `npm install --omit=dev && npm start` — sans clone du moteur,
-//      sans Vite, sans yarn link.
-//
-//      Utilisation :  npm run build   (une fois, sur votre machine)
-//                     npm run pack    (produit release/<nom>-<version>.tar.gz)
-// ---------------------------------------------------------------------------
-
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, statSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
@@ -31,12 +8,9 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 const bundle = join(root, 'dist-node', 'boot-node.mjs');
 
-// [EN] Refuse to package a build that does not exist — the whole point is
-//      shipping the bundle. [FR] Refuse d'empaqueter une compilation absente —
-//      tout l'intérêt est justement de livrer le bundle.
 if (!existsSync(bundle)) {
-    console.error('[pack] dist-node/boot-node.mjs is missing. Run `npm run build` first.');
-    console.error('[pack] dist-node/boot-node.mjs est absent. Lancez d\'abord `npm run build`.');
+    console.error('[pack] dist-node/boot-node.mjs is missing. Run `yarn build` first.');
+    console.error('[pack] dist-node/boot-node.mjs est absent. Lancez d\'abord `yarn build`.');
     process.exit(1);
 }
 
@@ -46,27 +20,18 @@ const outDir = join(root, 'release', name);
 rmSync(join(root, 'release'), { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
-// [EN] Runtime files only: the built bundle, the server sources, the sample env
-//      and the docs. harness/, vite config and the renderer are build-time only.
-// [FR] Fichiers d'exécution uniquement : le bundle compilé, les sources du
-//      serveur, l'exemple d'env et la doc. harness/, la config Vite et le moteur
-//      ne servent qu'à la compilation.
-for (const entry of ['dist-node', 'src', 'render.mjs', '.env.example', 'README.md', 'DEMARRAGE.md']) {
+for (const entry of ['dist-node', 'src', 'render.mjs', '.env.example', 'README.md', 'DEMARRAGE.md', '.yarnrc.yml', 'yarn.lock']) {
     const from = join(root, entry);
 
     if (existsSync(from)) cpSync(from, join(outDir, entry), { recursive: true });
 }
 
-// [EN] A runtime-only package.json: dev dependencies (pixi, vite, …) are gone,
-//      and `build` is replaced by a message so nobody wonders why it fails.
-// [FR] Un package.json d'exécution seule : les dépendances de développement
-//      (pixi, vite, …) disparaissent, et `build` est remplacé par un message
-//      pour que personne ne se demande pourquoi il échoue.
 const runtimePkg = {
     name: pkg.name,
     version: pkg.version,
     private: true,
     type: 'module',
+    packageManager: pkg.packageManager,
     description: `${ pkg.description } Prebuilt distribution — no renderer checkout or Vite build required.`,
     engines: { node: '>=20' },
     scripts: {
@@ -79,11 +44,6 @@ const runtimePkg = {
 
 writeFileSync(join(outDir, 'package.json'), `${ JSON.stringify(runtimePkg, null, 4) }\n`);
 
-// [EN] Docker image built from the prebuilt bundle: no git clone, no yarn, no
-//      Vite — minutes faster than the source Dockerfile, and it works offline.
-// [FR] Image Docker construite depuis le bundle précompilé : pas de git clone,
-//      pas de yarn, pas de Vite — plusieurs minutes de moins que le Dockerfile
-//      source, et cela fonctionne hors ligne.
 writeFileSync(join(outDir, 'Dockerfile'), `# [EN] Runtime image for the PREBUILT distribution. Only the native modules
 # (canvas, gl) are installed here; the renderer is already inside dist-node/.
 # [FR] Image d'exécution pour la distribution PRÉCOMPILÉE. Seuls les modules
@@ -149,8 +109,6 @@ services:
       start_period: 90s
 `);
 
-// [EN] Short install sheet aimed at whoever receives the archive.
-// [FR] Notice d'installation courte destinée à qui reçoit l'archive.
 writeFileSync(join(outDir, 'INSTALL.md'), `# ${ pkg.name } — distribution précompilée / prebuilt distribution
 
 **[FR]** Le moteur de rendu Nitro est déjà compilé dans \`dist-node/\`.
@@ -190,10 +148,6 @@ Voir \`GENERATE.md\` pour l'interface du générateur.
 See \`GENERATE.md\` for the generator UI.
 `);
 
-// [EN] Tarball. `tar` ships with Linux, macOS and Windows 10+; if it is missing
-//      the folder is still usable, so this is a soft failure.
-// [FR] Archive. `tar` est fourni avec Linux, macOS et Windows 10+ ; s'il manque,
-//      le dossier reste utilisable : l'échec est donc non bloquant.
 const tarball = join(root, 'release', `${ name }.tar.gz`);
 
 try {
@@ -208,4 +162,4 @@ try {
 }
 
 console.log(`[pack] ${ outDir }`);
-console.log('[pack] Recipients run: npm install --omit=dev && npm start   (or: docker compose up -d --build)');
+console.log('[pack] Recipients run: corepack enable && yarn workspaces focus --all --production && yarn start   (or: docker compose up -d --build)');
