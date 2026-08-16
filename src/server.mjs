@@ -6,6 +6,13 @@ import { encodeFrames } from './apng.mjs';
 import { RendererPool } from './renderer.mjs';
 import { createApiKeyGuard, createCors, createRateLimiter, makeClientIp, securityHeaders } from './security.mjs';
 import { createAccessLogger } from './logger.mjs';
+// [EN] Added: the browser-based avatar generator (GET /Generate).
+// [FR] Ajout : le générateur d'avatars pour navigateur (GET /Generate).
+import { createGenerateRouter } from './generate-route.mjs';
+// [EN] Added: optional read-only hotel database, used by the panel only.
+// [FR] Ajout : base de données de l'hôtel optionnelle en lecture seule, utilisée
+//      uniquement par le panel.
+import { checkDatabase, closeDatabase } from './db.mjs';
 
 class ResponseCache {
     #map = new Map();
@@ -97,6 +104,27 @@ if (CONFIG.accessLog) {
     });
 }
 
+// ---------------------------------------------------------------------------
+// [EN] Added: mount the generator UI. It gets its own rate-limit bucket because
+//      one preview refresh also loads 16 direction thumbnails from
+//      /avatarimage — sharing the image limiter would exhaust it in seconds.
+//      Express routing is case-insensitive, so /generate hits it as well.
+// [FR] Ajout : montage de l'interface du générateur. Elle a son propre compteur
+//      de limitation car un rafraîchissement d'aperçu charge aussi 16 vignettes
+//      de direction depuis /avatarimage — partager le compteur des images
+//      l'épuiserait en quelques secondes. Le routage Express étant insensible à
+//      la casse, /generate y accède également.
+// ---------------------------------------------------------------------------
+if (CONFIG.generate.enabled) {
+    const generateLimiter = createRateLimiter({
+        windowMs: CONFIG.rateLimitWindowMs,
+        max: CONFIG.rateLimitMax > 0 ? Math.max(30, Math.ceil(CONFIG.rateLimitMax / 4)) : 0,
+        clientIp
+    });
+
+    app.use(CONFIG.generate.path, generateLimiter, createGenerateRouter(CONFIG));
+}
+
 app.get('/health', (req, res) => {
     res.json({ status: renderer.ready ? 'ok' : 'starting', ready: renderer.ready, engine: '@pixi/node', concurrency: CONFIG.concurrency });
 });
@@ -127,7 +155,12 @@ app.get('/', (req, res) => {
             'Example:',
             '  /avatarimage?figure=hd-180-1.ch-255-66.lg-280-110.sh-305-62&action=wlk,wav&direction=2&size=l',
             '  /avatarimage?figure=hd-180-1.ch-255-66&text=Hello!&bubble_color=2266cc&text_color=ffffff',
-            ''
+            '',
+            // [EN] Added: point people at the visual builder.
+            // [FR] Ajout : indique le constructeur visuel.
+            ...(CONFIG.generate.enabled
+                ? [`GET ${ CONFIG.generate.path }`, '  Browser UI to build a figure and copy/download the image.', '']
+                : [])
         ].join('\n')
     );
 });
@@ -290,8 +323,74 @@ const start = async () => {
 
     await preflightGamedata();
 
+    // [EN] Added: check the panel's database once at boot so a wrong password or
+    //      a renamed column is reported here, not on the first search.
+    // [FR] Ajout : vérifie la base du panel une fois au démarrage pour qu'un
+    //      mauvais mot de passe ou une colonne renommée soit signalé ici, et non
+    //      à la première recherche.
+    // [EN] Credentials present but the switch is off: say so, it is almost
+    //      always a forgotten AVATAR_IMAGING_DB_ENABLED=true.
+    // [FR] Identifiants présents mais interrupteur éteint : on le signale, c'est
+    //      presque toujours un AVATAR_IMAGING_DB_ENABLED=true oublié.
+    if (CONFIG.db.configuredButOff) {
+        console.log('[pixinode] database OFF (AVATAR_IMAGING_DB_ENABLED is not true) — panel search disabled.');
+    }
+
+    if (CONFIG.db.enabled) {
+        const dbCheck = await checkDatabase(CONFIG.db, CONFIG.generate.authEnabled && CONFIG.generate.authMode === 'hotel');
+
+        if (dbCheck.ok) {
+            console.log(`[pixinode] database OK  ${ CONFIG.db.user }@${ CONFIG.db.host }:${ CONFIG.db.port }/${ CONFIG.db.database }`);
+        } else {
+            console.warn(`[pixinode] database ERR ${ dbCheck.error }`);
+            console.warn(
+                '  The panel\'s username search will not work. Check AVATAR_IMAGING_DB_* in .env\n' +
+                '  (host reachable from this process, user granted SELECT, table/column names).'
+            );
+        }
+    }
+
     const server = app.listen(CONFIG.port, CONFIG.host, () => {
         console.log(`[pixinode] listening on http://${ CONFIG.host }:${ CONFIG.port }`);
+
+        // [EN] Added: tell the operator where the generator lives, and warn when
+        //      the image rate limit is too low for it (one refresh ≈ 17 images).
+        // [FR] Ajout : indique à l'exploitant où se trouve le générateur, et
+        //      prévient si la limite de requêtes d'images est trop basse pour lui
+        //      (un rafraîchissement ≈ 17 images).
+        if (CONFIG.generate.enabled) {
+            const base = CONFIG.generate.publicUrl || `http://${ CONFIG.host }:${ CONFIG.port }`;
+
+            console.log(`[pixinode] generator panel on ${ base }${ CONFIG.generate.path }`);
+            console.log(`[pixinode] panel access: ${
+                CONFIG.generate.authEnabled
+                    ? `login form (${ CONFIG.generate.authMode }${
+                        CONFIG.generate.authMode === 'hotel' ? `, rank >= ${ CONFIG.generate.authMinRank }` : '' })`
+                    : (CONFIG.generate.token ? '?token=' : 'PUBLIC') }`);
+
+            // [EN] Loud warning: a login gate that cannot work leaves the panel
+            //      closed (503), which is safe but needs explaining.
+            // [FR] Avertissement appuyé : un portail qui ne peut pas fonctionner
+            //      laisse le panel fermé (503), ce qui est sûr mais mérite
+            //      explication.
+            if (CONFIG.generate.authEnabled && CONFIG.generate.authMode === 'hotel' && !CONFIG.db.enabled) {
+                console.warn(
+                    '[pixinode] PANEL CLOSED: AUTH_MODE=hotel needs AVATAR_IMAGING_DB_ENABLED=true.\n' +
+                    '  Enable the database, or switch to AVATAR_IMAGING_GENERATE_AUTH_MODE=password.'
+                );
+            }
+
+            if (CONFIG.generate.authEnabled && CONFIG.generate.authMode !== 'hotel' && !CONFIG.generate.authPassword) {
+                console.warn('[pixinode] PANEL CLOSED: AVATAR_IMAGING_GENERATE_PASSWORD is empty.');
+            }
+
+            if (CONFIG.rateLimitMax > 0 && CONFIG.rateLimitMax < 240) {
+                console.warn(
+                    `[pixinode] AVATAR_IMAGING_RATELIMIT_MAX=${ CONFIG.rateLimitMax } is low for the generator UI:\n` +
+                    '  one preview refresh requests ~17 images. Raise it to 240+ or the page will hit 429.'
+                );
+            }
+        }
     });
 
     try {
@@ -314,6 +413,9 @@ const start = async () => {
             await renderer.close();
         } catch {
         }
+
+        // [EN] Added: release the database pool too. [FR] Ajout : libère aussi le pool de base.
+        await closeDatabase();
 
         process.exit(0);
     };

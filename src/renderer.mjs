@@ -1,11 +1,24 @@
 import './browser-globals.mjs';
 import { dirname, resolve } from 'path';
 import { existsSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { CONFIG, buildRendererConfig } from './config.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUNDLE = resolve(HERE, '..', 'dist-node', 'boot-node.mjs');
+
+// [EN] Fixed for Windows: import() needs a URL, not a bare path. On Linux/macOS
+//      an absolute path like /app/dist-node/boot-node.mjs happens to work, but on
+//      Windows "C:\\...\\boot-node.mjs" makes Node read "c:" as a URL scheme and
+//      fail with "Only URLs with a scheme in: file, data, and node are supported".
+//      pathToFileURL() produces a proper file:// URL on every platform.
+// [FR] Corrigé pour Windows : import() attend une URL, pas un simple chemin. Sous
+//      Linux/macOS un chemin absolu comme /app/dist-node/boot-node.mjs fonctionne
+//      par chance, mais sous Windows « C:\\...\\boot-node.mjs » fait lire « c: » à
+//      Node comme un schéma d'URL, d'où l'erreur « Only URLs with a scheme in:
+//      file, data, and node are supported ». pathToFileURL() produit une vraie
+//      URL file:// sur toutes les plateformes.
+const BUNDLE_URL = pathToFileURL(BUNDLE).href;
 
 const fetchDefaultActions = async (actionsUrl) => {
     try {
@@ -49,7 +62,7 @@ export class RendererPool {
         globalThis.NitroConfig = config;
         globalThis.__IMAGING_OPTS__ = { fps: CONFIG.animationFps, maxFrames: CONFIG.maxFrames, debug: CONFIG.debug };
 
-        const module = await import(BUNDLE);
+        const module = await import(BUNDLE_URL);
 
         this.#initRenderer = module.initRenderer;
         this.#renderAvatar = module.renderAvatar;
