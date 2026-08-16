@@ -4,6 +4,7 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { encodeFrames } from './src/apng.mjs';
 import { buildRendererConfig, FPS, MAX_FRAMES } from './src/renderer-config.mjs';
+import { preflightGl } from './src/renderer.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -84,10 +85,11 @@ if (!existsSync(BUNDLE)) {
 }
 
 const t0 = Date.now();
-// [EN] Fixed for Windows: import() needs a file:// URL, not a bare path — see
-//      the same note in src/renderer.mjs.
-// [FR] Corrigé pour Windows : import() attend une URL file://, pas un simple
-//      chemin — voir la même note dans src/renderer.mjs.
+
+if (!await preflightGl()) {
+    process.exit(1);
+}
+
 const { initRenderer, renderAvatar } = await import(pathToFileURL(BUNDLE).href);
 
 console.log('[spike] booting renderer under @pixi/node …');

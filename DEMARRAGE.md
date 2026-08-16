@@ -20,7 +20,8 @@ sudo apt-get install -y build-essential python3 pkg-config \
   libgl1-mesa-dev libxi-dev libxext-dev libx11-dev fonts-liberation xvfb
 
 cd /chemin/vers/polaris-imager
-npm install
+corepack enable
+yarn install
 ```
 
 ## 2. Configurer
@@ -129,8 +130,8 @@ Tu te connectes avec ton pseudo et ton mot de passe de l'hôtel. Le service dét
 ## 3. Lancer
 
 ```bash
-xvfb-run -a npm start      # Linux
-npm start                  # Windows / macOS (pas de xvfb)
+xvfb-run -a yarn start     # Linux
+yarn start                 # Windows / macOS (pas de xvfb)
 ```
 
 Au démarrage tu dois lire :
@@ -202,15 +203,15 @@ WantedBy=multi-user.target
 Le coût de ce projet, c'est la compilation : cloner `duckietm/Nitro_Render_V3` et le bundler avec Vite. Tu le fais **une fois**, puis tu livres le résultat.
 
 ```bash
-npm run build     # -> dist-node/boot-node.mjs (le moteur Nitro bundlé)
-npm run pack      # -> release/avatar-imaging-pixinode-0.1.0.tar.gz
+yarn build        # -> dist-node/boot-node.mjs (le moteur Nitro bundlé)
+yarn run pack     # -> release/avatar-imaging-pixinode-0.1.0.tar.gz
 ```
 
 L'archive contient `dist-node/` déjà compilé, `src/`, un `package.json` réduit aux dépendances d'exécution, un `Dockerfile` + `docker-compose.yml` simplifiés, `.env.example` et un `INSTALL.md`. Celui qui la reçoit fait juste :
 
 ```bash
 cp .env.example .env
-docker compose up -d --build      # ou : npm install --omit=dev && xvfb-run -a npm start
+docker compose up -d --build      # ou : yarn workspaces focus --all --production && xvfb-run -a yarn start
 ```
 
 Pas de clone du moteur, pas de Vite, pas de `yarn link`. Seuls `canvas` et `gl` s'installent encore (binaires précompilés sur Node 20 LTS) — incontournable, ce sont des modules natifs. Pour supprimer même ça, pousse l'image Docker : ils n'auront plus qu'un `docker run`.
@@ -246,7 +247,7 @@ Le projet est **100 % Node.js** : aucun fichier PHP, aucune dépendance à un CM
 | `src/config.mjs` | Blocs `CONFIG.generate` et `CONFIG.db` |
 | `src/server.mjs` | Montage du panel, vérification de la base au démarrage, logs |
 | `.env.example` | Toutes les variables ci-dessus |
-| `scripts/pack-release.mjs` | L'empaquetage `npm run pack` |
+| `scripts/pack-release.mjs` | L'empaquetage `yarn run pack` |
 
 Tout ce qui a été ajouté est commenté en anglais **et** en français, préfixé `[EN]` / `[FR]`. Aucun fichier existant n'a été supprimé : `/avatarimage`, `/health`, `/` et le CLI `render.mjs` se comportent exactement comme avant.
 
@@ -256,10 +257,10 @@ Tout ce qui a été ajouté est commenté en anglais **et** en français, préfi
 
 Same service, two entry points: `GET /avatarimage?figure=…` returns the image (unchanged), `GET /Generate` is the new panel.
 
-1. **Install** — `apt-get install` the cairo/GL/xvfb packages listed above, then `npm install`.
+1. **Install** — `apt-get install` the cairo/GL/xvfb packages listed above, then `corepack enable && yarn install`.
 2. **Configure** — `cp .env.example .env`, set `NITRO_GAMEDATA_URL` / `NITRO_ASSET_URL` and `AVATAR_IMAGING_RATELIMIT_MAX=600`.
    - Username search, three modes: **off** (`AVATAR_IMAGING_DB_ENABLED=false`, the default — no database connection at all, the panel only creates avatars); **database** (`=true` plus a **read-only** MySQL account — the service only ever runs `SELECT` on `users.username` / `users.look`; gives the load button *and* live suggestions); **HTTP link** (`AVATAR_IMAGING_LOOKUP_URL` pointing at any URL of yours returning `{"figure":"…"}` — gives the load button only).
    - Private panel, three modes: `AUTH_MODE=password` (a shared account in `.env`, no database involved); `AUTH_MODE=hotel` (sign in with a real hotel account above a minimum rank — needs `DB_ENABLED=true`, and reads the password/rank columns; bcrypt and MD5/SHA hashes are both detected); or `AVATAR_IMAGING_GENERATE_TOKEN=…` for a shared-secret URL. A login gate that cannot work fails closed with a 503 rather than falling back to public.
-3. **Run** — `xvfb-run -a npm start` (no `xvfb` on Windows/macOS). The startup log tells you whether gamedata, assets and the database are reachable.
+3. **Run** — `xvfb-run -a yarn start` (no `xvfb` on Windows/macOS). The startup log tells you whether gamedata, assets and the database are reachable.
 4. **Check** — `/avatarimage?figure=hd-180-1.ch-255-66.lg-280-110`, `/Generate`, `/health`.
-5. **Redistribute** — `npm run build` once, then `npm run pack` produces a tarball whose recipients only need `docker compose up -d --build` (or `npm install --omit=dev && npm start`). No renderer clone, no Vite, no `yarn link`. Your `.env` is never included.
+5. **Redistribute** — `yarn build` once, then `yarn run pack` produces a tarball whose recipients only need `docker compose up -d --build` (or `yarn workspaces focus --all --production && yarn start`). No renderer clone, no Vite. Your `.env` is never included.
