@@ -437,9 +437,6 @@ filenames (`bubble_2_31_pointer.png` serves both 2 and 31).
 
 With a style selected the avatar is rendered *without* a bubble and the sprite is
 composited above it, frame by frame, so an animated avatar keeps its animation.
-At `size=l` the avatar is enlarged first and the bubble is then drawn at that same
-factor — the sprite nearest-scaled so its pixel art stays crisp, the text drawn at
-the final font size rather than magnified pixel by pixel.
 The bubble colour picker is replaced by the style picker plus a live preview
 rendered by `GET /Generate/bubble.png?id=…&text=…`. Set
 `AVATAR_IMAGING_CHAT_BUBBLES=0` to hide the feature and keep the engine bubble.
